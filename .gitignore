@@ -1,0 +1,82 @@
+# ------------------------------------------------------------------
+# Секреты и локальная конфигурация — главное, что не должно уехать в git
+# ------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+auth.json
+
+# ------------------------------------------------------------------
+# Зависимости и бинарники
+# ------------------------------------------------------------------
+composer.phar
+/vendor/
+/node_modules/
+
+# ------------------------------------------------------------------
+# Локальная база (SQLite для разработки; на сервере MySQL)
+# ------------------------------------------------------------------
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+
+# ------------------------------------------------------------------
+# Рантайм Laravel: кеш, сессии, скомпилированные вьюхи, логи
+# ------------------------------------------------------------------
+/storage/app/private/*
+!/storage/app/private/.gitignore
+/storage/app/public/*
+!/storage/app/public/.gitignore
+/storage/framework/cache/data/*
+!/storage/framework/cache/data/.gitignore
+/storage/framework/sessions/*
+!/storage/framework/sessions/.gitignore
+/storage/framework/testing/*
+!/storage/framework/testing/.gitignore
+/storage/framework/views/*
+!/storage/framework/views/.gitignore
+/storage/logs/*
+!/storage/logs/.gitignore
+/storage/pail
+/storage/*.key
+/bootstrap/cache/*
+!/bootstrap/cache/.gitignore
+*.log
+
+# ------------------------------------------------------------------
+# Сборка фронтенда (сейчас не используется — ассеты встроены в layout)
+# ------------------------------------------------------------------
+/public/build
+/public/hot
+/public/storage
+
+# ------------------------------------------------------------------
+# Тесты и инструменты
+# ------------------------------------------------------------------
+.phpunit.result.cache
+/.phpunit.cache
+_ide_helper.php
+_ide_helper_models.php
+.phpstorm.meta.php
+.phpactor.json
+.php-cs-fixer.cache
+
+# ------------------------------------------------------------------
+# Редакторы и ОС
+# ------------------------------------------------------------------
+/.idea
+/.vscode
+/.zed
+/.nova
+/.fleet
+/.cursor/
+/.codex
+/.claude/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+FIXES.md
+DEPLOY.md
