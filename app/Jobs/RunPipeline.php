@@ -24,6 +24,10 @@ class RunPipeline implements ShouldQueue
     /**
      * Стадии долгие, а на V7 их пять плюс переписывания. Час — потолок
      * с запасом; если упёрлись в него, что-то не так, и лучше упасть.
+     *
+     * ВАЖНО: значение должно быть строго меньше конфигурационного
+     * retry_after для драйвера database (DB_QUEUE_RETRY_AFTER).
+     * По умолчанию $timeout = 3600, поэтому DB_QUEUE_RETRY_AFTER должен быть > 3600.
      */
     public int $timeout = 3600;
 
