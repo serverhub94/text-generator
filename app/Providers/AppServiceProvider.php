@@ -58,6 +58,7 @@ class AppServiceProvider extends ServiceProvider
     {
         $limits = config('textgen.limits');
 
+    //    $limits['runs_per_hour_per_ip'] = 1000;
         // Два окна вместо одного: часовое ловит разгон, суточное ловит
         // равномерное выцеживание бюджета в течение дня.
         RateLimiter::for('textgen-hour', fn (Request $request) => Limit::perHour(

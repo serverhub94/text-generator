@@ -65,7 +65,7 @@ final class KeywordParser
      *
      * @return array{0: string, 1: int|null}
      */
-    private static function splitLine(string $line): array
+    private static function splitLine_old(string $line): array
     {
         // Число в конце строки — частотность. Разделителем может быть что
         // угодно, включая длинную цепочку табов из Google Docs.
@@ -81,6 +81,74 @@ final class KeywordParser
         // Частотности нет — это допустимо, ключ идёт с «нет данных».
         return [trim($line, " \t,;|"), null];
     }
+
+    private static function splitLine(string $line): array
+    {
+        $line = trim($line, " \t\n\r\0\x0B");
+
+        // 1) Если есть табуляция — строго табличная строка:
+        // колонка 1 = ключ, колонка 2 = кандидат на частотность, остальные игнорируем.
+        if (strpos($line, "\t") !== false) {
+            $cols = preg_split('/\t+/', $line);
+            $keyword = trim($cols[0] ?? '');
+            $candidate = isset($cols[1]) ? trim($cols[1]) : '';
+
+            $digits = self::normalizeFrequencyCandidate($candidate);
+            if ($keyword !== '' && $digits !== null) {
+                return [$keyword, (int)$digits];
+            }
+
+            return [$keyword, null];
+        }
+
+        // 2) Без табов — пытаемся найти число в конце строки, но только в строгом формате
+        // Разделители между ключом и числом могут быть пробелы, запятые, ; или |
+
+        if (preg_match('/^(.*?)[\s,;|]+(\d{1,3}(?:[ \x{00A0}\.]\d{3})*|\d+)$/u', $line, $m) === 1) {
+            $keyword = trim($m[1]);
+            $candidate = $m[2];
+
+            $digits = self::normalizeFrequencyCandidate($candidate);
+            if ($keyword !== '' && $digits !== null) {
+                return [$keyword, (int)$digits];
+            }
+        }
+
+        // Ничего однозначного — возвращаем ключ и null
+        return [trim($line, " \t,;|"), null];
+    }
+
+    /**
+     * Нормализует кандидат на частотность.
+     * Возвращает строку с цифрами (без разделителей) или null если невалидно/неоднозначно.
+     */
+    private static function normalizeFrequencyCandidate(string $candidate): ?string
+    {
+        $candidate = trim($candidate);
+
+        if ($candidate === '') {
+            return null;
+        }
+
+        // 1) Формат тысяч: 1-3 цифры, затем группы по 3 цифры, разделённые пробелом, NBSP или точкой
+        if (preg_match('/^\d{1,3}(?:[ \x{00A0}\.]\d{3})*$/u', $candidate) === 1) {
+            // Убираем пробелы, NBSP и точки (точки здесь считаем разделителем тысяч)
+            $digits = preg_replace('/[ \x{00A0}\.]/u', '', $candidate);
+            if ($digits !== '' && preg_match('/^\d+$/', $digits) === 1) {
+                return $digits;
+            }
+            return null;
+        }
+
+        // 2) Простой целый без разделителей
+        if (preg_match('/^\d+$/u', $candidate) === 1) {
+            return $candidate;
+        }
+
+        // 3) Всё остальное (включая дробные с точкой) — отвергаем
+        return null;
+    }
+
 
     /**
      * Готовит блок для промпта: ключ и частотность строго как их дал человек.
