@@ -10,8 +10,9 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * Один прогон конвейера.
  *
- * Изменения:
- * - Добавлено поле warnings в casts.
+ * Истории в интерфейсе нет — прогоны хранятся только потому, что генерация
+ * идёт в очереди и браузеру нужно куда-то опрашивать статус. Старые записи
+ * подчищает `textgen:prune`.
  */
 class Run extends Model
 {
@@ -47,7 +48,6 @@ class Run extends Model
             'stages' => 'array',
             'article_meta' => 'array',
             'usage' => 'array',
-            'warnings' => 'array',      // <-- добавлено
             'cost_usd' => 'float',
             'started_at' => 'datetime',
             'finished_at' => 'datetime',

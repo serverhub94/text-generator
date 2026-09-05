@@ -7,6 +7,25 @@
           id="status-badge">
         {{ ['queued' => 'В очереди', 'running' => 'Генерация', 'done' => 'Готово', 'failed' => 'Ошибка'][$run->status] }}
     </span>
+    {{-- Предупреждения о частичных результатах (например, упёрлось в max_tokens) --}}
+    @if(!empty($run->warnings))
+        <div class="alert alert-warning mb-3" role="alert">
+            <h5 class="mb-2">Предупреждение</h5>
+            <p class="mb-2">Во время генерации были зафиксированы предупреждения. Результаты предыдущих стадий сохранены частично.</p>
+            <ul class="mb-0">
+                @foreach($run->warnings as $w)
+                    <li>
+                        <strong>{{ $w['stage'] ?? 'stage' }}</strong>:
+                        {{ $w['message'] ?? ($w['reason'] ?? 'warning') }}
+                        @if(!empty($w['time']))
+                            <small class="text-muted">— {{ $w['time'] }}</small>
+                        @endif
+                    </li>
+                @endforeach
+            </ul>
+        </div>
+    @endif
+
 @endsection
 
 @section('content')

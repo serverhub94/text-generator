@@ -12,10 +12,9 @@ use RuntimeException;
 /**
  * Прогоняет выбранный режим по стадиям.
  *
- * Изменения:
- * - Добавлен колбэк onStageDone для уведомления о завершении каждой стадии.
- * - При isTruncated() теперь не бросается исключение: стадия сохраняется частично,
- *   формируется предупреждение и конвейер корректно останавливается.
+ * Все стадии идут одной перепиской: то, что модель выяснила на ресёрче, она
+ * видит, когда пишет ТЗ, а когда пишет текст — видит и ресёрч, и ТЗ. Это и
+ * качество, и деньги: растущий префикс переписки читается из кеша.
  */
 final class Pipeline
 {
@@ -35,9 +34,6 @@ final class Pipeline
     /** @var callable(string): void */
     private $onStage;
 
-    /** @var callable(string, string, array, float): void */
-    private $onStageDone;
-
     public function __construct(
         private readonly TextModel $claude,
         private readonly PromptRepository $prompts,
@@ -45,7 +41,6 @@ final class Pipeline
         private readonly array $config,
     ) {
         $this->onStage = static fn (string $stage) => null;
-        $this->onStageDone = static fn (string $stage, string $text, array $usage, float $cost) => null;
     }
 
     /**
@@ -61,20 +56,8 @@ final class Pipeline
     }
 
     /**
-     * Колбэк завершения стадии — вызывается после каждой успешно отработавшей стадии.
-     *
-     * @param callable(string $stage, string $text, array $usage, float $cost): void $callback
-     */
-    public function onStageDone(callable $callback): self
-    {
-        $this->onStageDone = $callback;
-
-        return $this;
-    }
-
-    /**
      * @param  array<string, mixed>  $input
-     * @return array{stages: array<string, string>, article: string, article_meta: array<string, string>, usage: array<string, int>, cost: float, warnings: array<int, array>}
+     * @return array{stages: array<string, string>, article: string, article_meta: array<string, string>, usage: array<string, int>, cost: float}
      */
     public function run(array $input): array
     {
@@ -87,7 +70,6 @@ final class Pipeline
         $outputs = [];
         $usage = ['input' => 0, 'output' => 0, 'cache_read' => 0, 'cache_write' => 0, 'searches' => 0];
         $cost = 0.0;
-        $warnings = [];
 
         foreach ($mode['stages'] as $stage) {
             ($this->onStage)($stage);
@@ -112,31 +94,12 @@ final class Pipeline
                 geo: (string) $input['geo'],
             );
 
-            // guardResult по-прежнему бросает исключения для отказов и пустых ответов
             $this->guardResult($result, $stage);
 
-            // Сохраняем вывод стадии
             $messages[] = ['role' => 'assistant', 'content' => $result->text];
             $outputs[$stage] = $result->text;
 
-            // Накопление usage/cost
             $this->accumulate($usage, $cost, $result);
-
-            // Вызов колбэка завершения стадии (перед возможной остановкой)
-            ($this->onStageDone)($stage, $result->text, $usage, $cost);
-
-            // Если стадия усечена по токенам — не бросаем, а останавливаем конвейер и пишем предупреждение
-            if ($result->isTruncated()) {
-                $warnings[] = [
-                    'stage' => $stage,
-                    'reason' => 'max_tokens',
-                    'message' => "Стадия '{$stage}' упёрлась в потолок токенов (max_tokens). Результат сохранён частично.",
-                    'time' => (string) now(),
-                ];
-
-                // Прекращаем цикл — возвращаем текущие накопленные данные
-                break;
-            }
         }
 
         // Аудит мог забраковать текст — режимы V4/V5 переписывают его.
@@ -164,7 +127,6 @@ final class Pipeline
             ],
             'usage' => $usage,
             'cost' => round($cost, 4),
-            'warnings' => $warnings,
         ];
     }
 
@@ -172,7 +134,11 @@ final class Pipeline
      * Пока аудит выносит «НЕ ПРОШЁЛ», переписываем статью с его замечаниями
      * на руках — но не больше отведённого режимом числа попыток.
      *
-     * (Оставлена без изменений; при необходимости можно аналогично вызывать onStageDone внутри)
+     * @param  array<string, mixed>  $mode
+     * @param  array<string, string>  $vars
+     * @param  list<array{role: string, content: mixed}>  $messages
+     * @param  array<string, string>  $outputs
+     * @param  array<string, int>  $usage
      */
     private function rewriteIfRejected(
         array $mode,
@@ -217,9 +183,6 @@ final class Pipeline
             $outputs['article'] = $article->text;
             $this->accumulate($usage, $cost, $article);
 
-            // Вызов колбэка завершения стадии для переписывания
-            ($this->onStageDone)("rewrite:{$attempt}", $article->text, $usage, $cost);
-
             // Перепроверяем — иначе «до 2 раз» превращается в «один раз и на удачу».
             ($this->onStage)("audit:{$attempt}");
 
@@ -239,9 +202,6 @@ final class Pipeline
             $messages[] = ['role' => 'assistant', 'content' => $audit->text];
             $outputs['audit'] = $audit->text;
             $this->accumulate($usage, $cost, $audit);
-
-            // Вызов колбэка завершения стадии аудита
-            ($this->onStageDone)("audit:{$attempt}", $audit->text, $usage, $cost);
         }
     }
 
@@ -303,7 +263,7 @@ final class Pipeline
         return implode("\n\n", array_filter([
             '# SUPPLIED DATA',
             'Всё числовое ниже вставлено человеком из Ahrefs. Это единственный '
-            .'допустимый источник цифр. Чего здесь нет — «нет данных».',
+                .'допустимый источник цифр. Чего здесь нет — «нет данных».',
             "## Target query\n".$vars['target_query'],
             "## Market\nGEO: {$vars['geo']}\nЯзык: {$vars['language']}",
             "## Domain\n".($vars['domain'] !== '' ? $vars['domain'] : 'не указан'),
@@ -323,7 +283,7 @@ final class Pipeline
         return [
             'target_query' => trim((string) $input['target_query']),
             'geo' => strtoupper(trim((string) $input['geo'])),
-            'language' => trim((string) ($input['language'] ?? '')),
+            'language' => trim((string) $input['language']),
             'domain' => trim((string) ($input['domain'] ?? '')),
             'page_type' => trim((string) ($input['page_type'] ?? 'не указан')),
             'site_type' => trim((string) ($input['site_type'] ?? 'партнёрский казино-сайт')),
@@ -354,7 +314,13 @@ final class Pipeline
             );
         }
 
-        // Пустой текст — фатальная ошибка
+        if ($result->isTruncated()) {
+            throw new RuntimeException(
+                "Стадия «{$stage}» упёрлась в потолок токенов и оборвалась. "
+                .'Поднимите max_tokens для режима или сократите вводные.'
+            );
+        }
+
         if (trim($result->text) === '') {
             throw new RuntimeException("Стадия «{$stage}» вернула пустой ответ.");
         }

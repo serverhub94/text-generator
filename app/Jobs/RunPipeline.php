@@ -6,35 +6,31 @@ namespace App\Jobs;
 
 use App\Models\Run;
 use App\Services\Pipeline;
+//use Illuminate\Bus\Dispatchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
 use Throwable;
 
 /**
  * Гоняет конвейер в очереди.
  *
- * Полный цикл на V5/V7 идёт минутами: держать всё это время открытым HTTP-
- * соединение через nginx и php-fpm — верный способ ловить 504. Поэтому веб
- * только ставит задачу, а браузер опрашивает статус.
+ * Изменения:
+ * - Подписываемся на onStageDone и сохраняем промежуточные результаты в БД
+ *   после каждой стадии (stages, usage, cost_usd).
+ * - Финальное обновление сохраняет warnings, если они есть.
  */
 class RunPipeline implements ShouldQueue
 {
-    use Queueable;
+    use Dispatchable, InteractsWithQueue, SerializesModels;
 
     /**
      * Стадии долгие, а на V7 их пять плюс переписывания. Час — потолок
      * с запасом; если упёрлись в него, что-то не так, и лучше упасть.
-     *
-     * ВАЖНО: значение должно быть строго меньше конфигурационного
-     * retry_after для драйвера database (DB_QUEUE_RETRY_AFTER).
-     * По умолчанию $timeout = 3600, поэтому DB_QUEUE_RETRY_AFTER должен быть > 3600.
      */
     public int $timeout = 3600;
 
-    /**
-     * Повторов нет: каждая попытка стоит денег, а падение почти всегда
-     * означает проблему во вводных, а не сетевой сбой.
-     */
     public int $tries = 1;
 
     public function __construct(public readonly int $runId) {}
@@ -52,14 +48,28 @@ class RunPipeline implements ShouldQueue
             'started_at' => now(),
         ]);
 
-        $result = $pipeline
-            ->onStage(function (string $stage) use ($run) {
-                // Пишем текущую стадию сразу — это единственный признак
-                // прогресса, который видит человек в браузере.
-                $run->forceFill(['stage' => $stage])->save();
-            })
-            ->run($run->input);
+        // Подписываемся на onStage — для отображения текущей стадии в UI
+        $pipeline = $pipeline->onStage(function (string $stage) use ($run) {
+            $run->forceFill(['stage' => $stage])->save();
+        });
 
+        // Подписываемся на onStageDone — сохраняем промежуточные результаты в БД
+        $pipeline = $pipeline->onStageDone(function (string $stage, string $text, array $usage, float $cost) use ($run) {
+            $stages = (array) $run->stages;
+            $stages[$stage] = $text;
+
+            // Сохраняем промежуточные данные: stages, usage, cost_usd
+            $run->forceFill([
+                'stages' => $stages,
+                'usage' => $usage,
+                'cost_usd' => $cost,
+            ])->save();
+        });
+
+        // Запускаем pipeline — он вернёт текущие накопленные данные (включая warnings)
+        $result = $pipeline->run($run->input);
+
+        // Обновляем финальные поля (включая warnings, если есть)
         $run->update([
             'status' => Run::STATUS_DONE,
             'stage' => null,
@@ -68,6 +78,7 @@ class RunPipeline implements ShouldQueue
             'article_meta' => $result['article_meta'],
             'usage' => $result['usage'],
             'cost_usd' => $result['cost'],
+            'warnings' => $result['warnings'] ?? null,
             'finished_at' => now(),
         ]);
     }
