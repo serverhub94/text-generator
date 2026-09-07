@@ -65,22 +65,6 @@ final class KeywordParser
      *
      * @return array{0: string, 1: int|null}
      */
-    private static function splitLine_old(string $line): array
-    {
-        // Число в конце строки — частотность. Разделителем может быть что
-        // угодно, включая длинную цепочку табов из Google Docs.
-        if (preg_match('/^(.*?)[\s,;|]+([\d][\d\s\x{00A0},.]*)$/u', $line, $m) === 1) {
-            $keyword = trim($m[1]);
-            $digits = preg_replace('/[^\d]/u', '', $m[2]) ?? '';
-
-            if ($keyword !== '' && $digits !== '') {
-                return [$keyword, (int) $digits];
-            }
-        }
-
-        // Частотности нет — это допустимо, ключ идёт с «нет данных».
-        return [trim($line, " \t,;|"), null];
-    }
 
     private static function splitLine(string $line): array
     {

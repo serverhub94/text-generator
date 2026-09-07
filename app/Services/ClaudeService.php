@@ -225,41 +225,7 @@ final class ClaudeService implements TextModel
         };
     }
 
-    private function toResult0(Message $message): ClaudeResult
-    {
 
-
-        $text = '';
-
-        foreach ($message->content as $block) {
-            // Блоки полиморфны: помимо текста приходят thinking и результаты
-            // серверных инструментов. Забираем только текстовые.
-            if ($block instanceof TextBlock) {
-                $text .= $block->text;
-            }
-        }
-
-        $usage = $message->usage;
-        $cacheRead = $usage->cacheReadInputTokens ?? 0;
-        $cacheWrite = $usage->cacheCreationInputTokens ?? 0;
-        $searches = $usage->serverToolUse?->webSearchRequests ?? 0;
-
-        return new ClaudeResult(
-            text: trim($text),
-            inputTokens: $usage->inputTokens,
-            outputTokens: $usage->outputTokens,
-            cacheReadTokens: $cacheRead,
-            cacheWriteTokens: $cacheWrite,
-            webSearches: $searches,
-            stopReason: $message->stopReason,
-            costUsd: $this->cost(
-                $usage->inputTokens,
-                $usage->outputTokens,
-                $cacheRead,
-                $cacheWrite,
-            ),
-        );
-    }
 
     private function toResult(Message $message): ClaudeResult
     {
