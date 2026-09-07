@@ -159,7 +159,7 @@ final class Pipeline
 
         // Аудит мог забраковать текст — режимы V4/V5 переписывают его.
         if (isset($outputs['audit'], $outputs['article']) && ($mode['rewrites'] ?? 0) > 0) {
-            $this->rewriteIfRejected($mode, $vars, $rules, $messages, $outputs, $usage, $cost);
+            $this->rewriteIfRejected($mode, $vars, $rules, $messages, $outputs, $usage, $cost, $warnings);
         }
 
         // Статья — HTML-фрагмент, а мета и служебный блок к разметке не
@@ -200,13 +200,33 @@ final class Pipeline
         array &$outputs,
         array &$usage,
         float &$cost,
+        array &$warnings,
     ): void {
         $attempts = (int) $mode['rewrites'];
 
         for ($attempt = 1; $attempt <= $attempts; $attempt++) {
-            if (! $this->auditRejected($outputs['audit'])) {
+
+            // меняем логику вердикта
+           /* if (! $this->auditRejected($outputs['audit'])) {
+                return;
+            }*/
+            $verdict = self::parseAuditVerdict($outputs['audit'] ?? '');
+            if ($verdict === null) {
+                // Не распознали вердикт — не перезапускаем генерацию, а пишем предупреждение
+                $warnings[] = [
+                    'stage' => 'audit',
+                    'reason' => 'audit_verdict_unrecognized',
+                    'message' => 'Audit verdict not recognized; skipping rewrite to avoid false positive.',
+                    'time' => (string) now(),
+                ];
                 return;
             }
+
+            if ($verdict !== 'failed') {
+                // Если не "НЕ ПРОШЁЛ" — не переписываем
+                return;
+            }
+
 
             ($this->onStage)("rewrite:{$attempt}");
 
@@ -271,6 +291,54 @@ final class Pipeline
     {
         return preg_match('/\bНЕ\s+ПРОШ[ЁЕ]Л\b/u', $audit) === 1;
     }
+
+
+    /**
+     * Разбирает текст аудита и возвращает один из: 'passed', 'passed_with_remarks', 'failed', или null если не распознано.
+     */
+    public static function parseAuditVerdict(string $auditText): ?string
+    {
+        // Нормализуем переносы и кодировку
+        $text = str_replace(["\r\n", "\r"], "\n", $auditText);
+        // Найдём заголовок "## Вердикт" (регистронезависимо)
+        $pos = mb_stripos($text, '## вердикт');
+        if ($pos === false) {
+            // Если заголовка нет — попробуем искать в начале текста первые строки
+            $after = $text;
+        } else {
+            $after = mb_substr($text, $pos + mb_strlen('## вердикт'));
+        }
+
+        // Разбиваем на строки и ищем первую значимую
+        $lines = preg_split("/\n/", $after);
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if ($line === '') {
+                continue;
+            }
+            // Игнорируем строки, которые явно являются форматом с перечислением через |
+            if (strpos($line, '|') !== false) {
+                continue;
+            }
+            // Убираем возможные маркеры и кавычки
+            $clean = mb_strtoupper(preg_replace('/[^\p{L}\p{N}\s\-]/u', '', $line));
+            // Сопоставляем ключевые фразы
+            if (mb_strpos($clean, 'НЕ ПРОШ') !== false) {
+                return 'failed';
+            }
+            if (mb_strpos($clean, 'ПРОШЁЛ С ЗАМЕЧАНИЯМИ') !== false || mb_strpos($clean, 'ПРОШЕЛ С ЗАМЕЧАНИЯМИ') !== false) {
+                return 'passed_with_remarks';
+            }
+            if (mb_strpos($clean, 'ПРОШ') !== false || mb_strpos($clean, 'ПРОШЁЛ') !== false || mb_strpos($clean, 'ПРОШЕЛ') !== false) {
+                return 'passed';
+            }
+            // Если строка не распознана — прекращаем поиск и вернём null
+            return null;
+        }
+
+        return null;
+    }
+
 
     /**
      * @param  array<string, mixed>  $mode
