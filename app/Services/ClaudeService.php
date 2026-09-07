@@ -39,7 +39,7 @@ final class ClaudeService implements TextModel
     /**
      * @param  list<array{role: string, content: mixed}>  $messages
      */
-    public function send(
+    public function send0(
         string $rules,
         array $messages,
         string $effort,
@@ -74,6 +74,140 @@ final class ClaudeService implements TextModel
 
         return $this->toResult($message);
     }
+
+    /**
+     * @param  list<array{role: string, content: mixed}>  $messages
+     */
+    public function send(
+        string $rules,
+        array $messages,
+        string $effort,
+        int $maxTokens,
+        bool $withWebTools = false,
+        ?string $geo = null,
+    ): ClaudeResult {
+        // Максимум дозапросов: сначала из конфига, иначе из env, иначе 5
+        $maxContinuations = (int) ($this->config['max_continuations'] ?? env('TEXTGEN_MAX_CONTINUATIONS', 5));
+        if ($maxContinuations < 0) {
+            $maxContinuations = 5;
+        }
+
+        // Накопители для суммирования метрик и текста
+        $totalInput = 0;
+        $totalOutput = 0;
+        $totalCacheRead = 0;
+        $totalCacheWrite = 0;
+        $totalSearches = 0;
+        $totalCost = 0.0;
+        $allText = '';
+        $finalStopReason = null;
+
+        // Исходные сообщения — будем дополнять ассистентским блоком при продолжениях
+        $currentMessages = $messages;
+
+        $continuation = 0;
+
+        do {
+            // Создаём стрим (как раньше)
+            $stream = $this->client->messages->createStream(
+                maxTokens: $maxTokens,
+                messages: $currentMessages,
+                model: (string) $this->config['model'],
+                cacheControl: ['type' => 'ephemeral'],
+                outputConfig: ['effort' => $effort],
+                system: [
+                    ['type' => 'text', 'text' => $rules],
+                ],
+                thinking: ['type' => 'adaptive'],
+                tools: $withWebTools ? $this->webTools($geo) : null,
+            );
+
+            $accumulator = MessageAccumulator::forMessages();
+
+            foreach ($stream as $event) {
+                $accumulator->accumulate($event);
+            }
+
+            $message = $accumulator->message();
+
+            // Собираем текст из текстовых блоков и добавляем к общему
+            $pieceText = '';
+            foreach ($message->content as $block) {
+                if ($block instanceof TextBlock) {
+                    $pieceText .= $block->text;
+                }
+            }
+            $pieceText = trim($pieceText);
+            if ($pieceText !== '') {
+                // Добавляем с разделителем, если уже есть текст
+                $allText .= $allText === '' ? $pieceText : ("\n" . $pieceText);
+            }
+
+            // Накопление usage/cost из текущего сообщения
+            $usage = $message->usage;
+            $cacheRead = $usage->cacheReadInputTokens ?? 0;
+            $cacheWrite = $usage->cacheCreationInputTokens ?? 0;
+            $searches = $usage->serverToolUse?->webSearchRequests ?? 0;
+
+            $totalInput += (int) ($usage->inputTokens ?? 0);
+            $totalOutput += (int) ($usage->outputTokens ?? 0);
+            $totalCacheRead += (int) $cacheRead;
+            $totalCacheWrite += (int) $cacheWrite;
+            $totalSearches += (int) $searches;
+
+            $totalCost += $this->cost(
+                (int) ($usage->inputTokens ?? 0),
+                (int) ($usage->outputTokens ?? 0),
+                (int) $cacheRead,
+                (int) $cacheWrite,
+            );
+
+            $finalStopReason = $message->stopReason;
+
+            // Если модель вернула pause_turn — подготовить дозапрос:
+            // добавляем ассистентский ход с полным набором блоков ответа (message->content)
+            if ($finalStopReason === 'pause_turn') {
+                $continuation++;
+
+                if ($continuation > $maxContinuations) {
+                    throw new \RuntimeException("Exceeded max continuations ({$maxContinuations}) while handling pause_turn.");
+                }
+
+                // Формируем ассистентский блок: role assistant, content — оригинальные блоки
+                // Важно: не добавляем никаких текстовых сообщений, только блоки ответа модели.
+                $assistantBlock = [
+                    'role' => 'assistant',
+                    'content' => $message->content,
+                ];
+
+                // Для следующего запроса используем исходные сообщения + ассистентский блок
+                // (не добавляем дополнительные user/assistant тексты)
+                $currentMessages = array_merge($messages, [$assistantBlock]);
+
+                // Продолжаем цикл — новый запрос
+                continue;
+            }
+
+            // Если stopReason не pause_turn — выходим из цикла
+            break;
+
+        } while (true);
+
+        // Формируем итоговый результат
+        $result = new ClaudeResult(
+            text: trim($allText),
+            inputTokens: $totalInput,
+            outputTokens: $totalOutput,
+            cacheReadTokens: $totalCacheRead,
+            cacheWriteTokens: $totalCacheWrite,
+            webSearches: $totalSearches,
+            stopReason: $finalStopReason,
+            costUsd: $totalCost,
+        );
+
+        return $result;
+    }
+
 
     /**
      * Серверные инструменты Anthropic: поиск и чтение страниц выполняются на
