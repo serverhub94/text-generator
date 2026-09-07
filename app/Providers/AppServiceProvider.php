@@ -16,7 +16,7 @@ use RuntimeException;
 
 class AppServiceProvider extends ServiceProvider
 {
-    public function register(): void
+    public function register0(): void
     {
         $this->app->singleton(Client::class, function () {
             $key = (string) config('textgen.api_key');
@@ -52,7 +52,59 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(BudgetGuard::class, fn () => new BudgetGuard(
             (float) config('textgen.limits.monthly_budget_usd'),
         ));
+
+        $this->app->singleton(\App\Services\AI\AiClientFactory::class, function($app) {
+            return new \App\Services\AI\AiClientFactory($app);
+        });
     }
+
+    public function register2(): void
+    {
+        // PromptRepository и BudgetGuard — всегда
+        $this->app->singleton(PromptRepository::class, fn () => new PromptRepository(resource_path('prompts')));
+        $this->app->singleton(BudgetGuard::class, fn () => new BudgetGuard((float) config('textgen.limits.monthly_budget_usd')));
+
+        // Фабрика всегда
+        $this->app->singleton(\App\Services\AI\AiClientFactory::class, function ($app) {
+            return new \App\Services\AI\AiClientFactory($app);
+        });
+
+        // Claude — только если есть ключ
+        $anthropicKey = (string) config('textgen.api_key', '');
+        if ($anthropicKey !== '') {
+            $this->app->singleton(\Anthropic\Client::class, fn() => new \Anthropic\Client(apiKey: $anthropicKey));
+            $this->app->singleton(ClaudeService::class, fn($app) => new ClaudeService($app->make(\Anthropic\Client::class), config('textgen')));
+            // НЕ делаем alias TextModel => ClaudeService
+        }
+
+        // Gemini — только если есть ключ
+        $geminiKey = (string) (config('services.gemini.key') ?? config('textgen.gemini_api_key') ?? '');
+        if ($geminiKey !== '') {
+
+            $this->app->bind(\App\Services\AI\GeminiService::class, function ($app) {
+                $guzzle = new \GuzzleHttp\Client();
+                $cfg = config('services.gemini', []) + config('textgen.gemini', []);
+                return new \App\Services\AI\GeminiService($guzzle, $cfg);
+            });
+        }
+    }
+
+    public function register(): void
+    {
+        // PromptRepository и BudgetGuard — всегда
+        $this->app->singleton(PromptRepository::class, fn () => new PromptRepository(resource_path('prompts')));
+        $this->app->singleton(BudgetGuard::class, fn () => new BudgetGuard((float) config('textgen.limits.monthly_budget_usd')));
+
+        // Фабрика всегда
+        $this->app->singleton(\App\Services\AI\AiClientFactory::class, function ($app) {
+            return new \App\Services\AI\AiClientFactory($app);
+        });
+
+        // Никаких автоматических биндингов конкретных провайдеров здесь нет.
+        // Регистрация конкретных сервисов будет выполняться явно там, где это нужно (контроллер/валидация/job).
+    }
+
+
 
     public function boot(): void
     {

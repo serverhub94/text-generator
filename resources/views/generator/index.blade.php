@@ -130,6 +130,15 @@
             </div>
         </div>
 
+        <div class="form-group"  style="margin-bottom:30px">
+            <label for="ai_model">AI модель</label>
+            <select name="ai_model" id="ai_model" class="form-control">
+                <option value="claude" selected>Claude (по умолчанию)</option>
+                <option value="gemini">Gemini</option>
+            </select>
+        </div>
+
+
         <div class="row">
             <button type="submit" class="primary" @disabled($budget->exceeded())>
                 Запустить генерацию

@@ -13,6 +13,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\View\View;
+use RuntimeException;
 
 class GeneratorController extends Controller
 {
@@ -26,8 +27,9 @@ class GeneratorController extends Controller
         ]);
     }
 
-    public function store(StoreRunRequest $request): RedirectResponse
+    public function store0(StoreRunRequest $request): RedirectResponse
     {
+
         if ($this->budget->exceeded()) {
             return back()
                 ->withInput()
@@ -52,6 +54,103 @@ class GeneratorController extends Controller
 
         return redirect()->route('runs.show', $run);
     }
+
+    public function store1(StoreRunRequest $request)
+    {
+        $aiModel = $request->input('ai_model', config('textgen.default_ai', ''));
+
+        // Попытка зарегистрировать/создать клиент заранее:
+        // Здесь мы явно регистрируем конкретный сервис в контейнере при необходимости,
+        // либо просто проверяем, что фабрика сможет его создать.
+        try {
+            // Если вы хотите регистрировать конкретный сервис динамически — делайте это здесь.
+            // Пример: если gemini выбран, регистрируем GeminiService только если есть ключ.
+            if ($aiModel === 'gemini') {
+                $geminiKey = (string) (config('services.gemini.key') ?? config('textgen.gemini_api_key') ?? '');
+                if ($geminiKey !== '') {
+                    app()->bind(\App\Services\AI\GeminiService::class, function ($app) {
+                        $guzzle = new \GuzzleHttp\Client();
+                        $cfg = config('services.gemini', []) + config('textgen.gemini', []);
+                        return new \App\Services\AI\GeminiService($guzzle, $cfg);
+                    });
+                }
+            }
+
+            if ($aiModel === 'claude') {
+                $anthropicKey = (string) config('textgen.api_key', '');
+                if ($anthropicKey !== '') {
+                    app()->singleton(\Anthropic\Client::class, fn() => new \Anthropic\Client(apiKey: $anthropicKey));
+                    app()->singleton(\App\Services\ClaudeService::class, fn($app) => new \App\Services\ClaudeService($app->make(\Anthropic\Client::class), config('textgen')));
+                }
+            }
+
+            // Проверяем, сможет ли фабрика создать нужный клиент
+            app(\App\Services\AI\AiClientFactory::class)->make($aiModel);
+        } catch (\Throwable $e) {
+            return back()->withErrors(['ai_model' => 'Selected AI provider is not configured: ' . $e->getMessage()]);
+        }
+
+        // Всё ок — сохраняем input и создаём Run
+        $safe = $request->safe()->all();
+        $safe['ai_model'] = $aiModel;
+
+        $run = Run::create([
+            'status' => Run::STATUS_QUEUED,
+            'mode' => $request->string('mode')->value(),
+            'input' => $safe,
+            'ip' => $request->ip(),
+        ]);
+
+        // Принудительно на database, чтобы исключить скрытый sync
+       /// RunPipeline::dispatch($run->id)->onConnection('database')->onQueue('default');
+        ///
+        RunPipeline::dispatch($run->id);
+
+
+        return redirect()->route('runs.show', $run);
+    }
+
+    public function store(StoreRunRequest $request)
+    {
+        if ($this->budget->exceeded()) {
+            return back()
+                ->withInput()
+                ->withErrors([
+                    'mode' => sprintf(
+                        'Месячный потолок расходов исчерпан (%.2f из %.2f USD). '
+                        .'Поднимите TEXTGEN_MONTHLY_BUDGET_USD или дождитесь следующего месяца.',
+                        $this->budget->spentThisMonth(),
+                        $this->budget->budget(),
+                    ),
+                ]);
+        }
+        $aiModel = $request->input('ai_model', config('textgen.default_ai', ''));
+
+        // Проверяем заранее — фабрика бросит исключение, если провайдер не настроен
+        try {
+            app(\App\Services\AI\AiClientFactory::class)->make($aiModel);
+        } catch (\Throwable $e) {
+           return back()->withErrors(['ai_model' => 'Method Store Exeption: ' . $e->getMessage()]);
+        }
+
+        $safe = $request->safe()->all();
+        $safe['ai_model'] = $aiModel;
+
+        $run = Run::create([
+            'status' => Run::STATUS_QUEUED,
+            'mode' => $request->string('mode')->value(),
+            'input' => $safe,
+            'ip' => $request->ip(),
+        ]);
+
+
+        RunPipeline::dispatch($run->id);
+      //  RunPipeline::dispatchSync($run->id);
+
+        return redirect()->route('runs.show', $run);
+    }
+
+
 
     public function show(Run $run): View
     {

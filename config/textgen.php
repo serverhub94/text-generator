@@ -15,7 +15,24 @@ return [
      | env() за пределами config-файлов возвращает null, и приложение
      | падало бы на проде ровно после рекомендованной оптимизации.
      */
-    'api_key' => env('ANTHROPIC_API_KEY', ''),
+    'api_key' => env('ANTHROPIC_API_KEY', '12jjj345678rgfdgfrtgfr'),
+
+    'gemini_api_key' => env('GEMINI_API_KEY', ''),
+    'default_ai' => 'claude',
+
+    'gemini' => [
+        'key' => env('GEMINI_API_KEY', ''),
+        'model' => env('GEMINI_MODEL', 'gemini-2.5-flash-lite'),
+        'endpoint' => env('GEMINI_ENDPOINT', 'https://generativelanguage.googleapis.com/v1beta/models'),
+        'timeout' => 120,
+        'pricing' => [
+            'input_per_mtok' => 0.0,
+            'output_per_mtok' => 0.0,
+            'cache_read_per_mtok' => 0.0,
+            'cache_write_per_mtok' => 0.0,
+        ],
+    ],
+
 
     'model' => env('TEXTGEN_MODEL', 'claude-opus-5'),
 

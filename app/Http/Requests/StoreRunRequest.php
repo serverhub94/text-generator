@@ -41,6 +41,8 @@ class StoreRunRequest extends FormRequest
             'keywords' => ['nullable', 'string', 'max:60000'],
             'competitors' => ['nullable', 'string', 'max:8000'],
             'notes' => ['nullable', 'string', 'max:8000'],
+           // 'ai_model' => ['required', 'string', 'max:500'],
+            'ai_model' => ['required', 'string', 'in:claude,gemini'],
 
             'mode' => ['required', Rule::in(array_keys(config('textgen.modes')))],
         ];
