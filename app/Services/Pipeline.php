@@ -115,9 +115,27 @@ final class Pipeline
             // guardResult по-прежнему бросает исключения для отказов и пустых ответов
             $this->guardResult($result, $stage);
 
+            if (in_array($stage, self::WEB_STAGES, true)) {
+                if ($result->successfulToolResponses === 0) {
+                    throw new RuntimeException("Web stage '{$stage}' returned zero successful tool responses (possible max_uses_exceeded or other tool error).");
+                }
+
+                if (!empty($result->toolErrors)) {
+                    $warnings[] = [
+                        'stage' => $stage,
+                        'reason' => 'tool_errors',
+                        'message' => 'Some web tool calls returned errors; results may be partial.',
+                        'errors' => $result->toolErrors,
+                        'time' => (string) now(),
+                    ];
+                }
+            }
+
             // Сохраняем вывод стадии
             $messages[] = ['role' => 'assistant', 'content' => $result->text];
             $outputs[$stage] = $result->text;
+
+
 
             // Накопление usage/cost
             $this->accumulate($usage, $cost, $result);

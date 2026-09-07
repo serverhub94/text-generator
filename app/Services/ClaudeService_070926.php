@@ -28,7 +28,7 @@ use Anthropic\Messages\WebSearchTool20260209;
  *    сама выяснила раньше, а стабильный префикс переписки попадает в кеш —
  *    поздние стадии стоят заметно дешевле ранних.
  */
-final class ClaudeService_old070926 implements TextModel
+final class ClaudeService_070926 implements TextModel
 {
     public function __construct(
         private readonly Client $client,

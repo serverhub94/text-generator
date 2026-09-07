@@ -225,8 +225,10 @@ final class ClaudeService implements TextModel
         };
     }
 
-    private function toResult(Message $message): ClaudeResult
+    private function toResult0(Message $message): ClaudeResult
     {
+
+
         $text = '';
 
         foreach ($message->content as $block) {
@@ -259,6 +261,11 @@ final class ClaudeService implements TextModel
         );
     }
 
+    private function toResult(Message $message): ClaudeResult
+    {
+        return self::parseMessageToResult($message, $this->config);
+    }
+
     private function cost(int $in, int $out, int $cacheRead, int $cacheWrite): float
     {
         $p = $this->config['pricing'];
@@ -269,4 +276,87 @@ final class ClaudeService implements TextModel
             + $cacheRead / 1_000_000 * (float) $p['cache_read_per_mtok']
             + $cacheWrite / 1_000_000 * (float) $p['cache_write_per_mtok'];
     }
+
+    public static function parseMessageToResult(object $message, array $config): ClaudeResult
+    {
+        $text = '';
+        foreach ($message->content as $block) {
+            if (is_object($block) && property_exists($block, 'text')) {
+                $text .= $block->text;
+            }
+        }
+        $text = trim($text);
+
+        $usage = $message->usage ?? (object) [];
+        $cacheRead = $usage->cacheReadInputTokens ?? 0;
+        $cacheWrite = $usage->cacheCreationInputTokens ?? 0;
+        $searches = $usage->serverToolUse?->webSearchRequests ?? ($usage->webSearchRequests ?? 0);
+        $inputTokens = (int) ($usage->inputTokens ?? 0);
+        $outputTokens = (int) ($usage->outputTokens ?? 0);
+
+        $toolErrors = [];
+        $successfulToolResponses = 0;
+
+        foreach ($message->content as $block) {
+            if (!is_object($block)) {
+                continue;
+            }
+
+            // Стандартный путь: блоки инструментов имеют поле 'tool'
+            if (property_exists($block, 'tool')) {
+                $toolName = (string) $block->tool;
+
+                if (property_exists($block, 'error') && $block->error !== null) {
+                    $err = $block->error;
+                    $code = is_object($err) && property_exists($err, 'code') ? (string)$err->code : (string)$err;
+                    $msg  = is_object($err) && property_exists($err, 'message') ? $err->message : null;
+                    $toolErrors[] = ['tool' => $toolName, 'code' => $code, 'message' => $msg];
+                }
+
+                if (property_exists($block, 'results') && !empty((array)$block->results)) {
+                    $successfulToolResponses += count((array)$block->results);
+                } elseif (property_exists($block, 'items') && !empty((array)$block->items)) {
+                    $successfulToolResponses += count((array)$block->items);
+                } elseif (property_exists($block, 'url') || property_exists($block, 'title')) {
+                    $successfulToolResponses += 1;
+                }
+            }
+
+            // Альтернативные форматы: блоки с type, содержащим web/fetch
+            if (property_exists($block, 'type') && is_string($block->type) && preg_match('/web|fetch/i', $block->type)) {
+                if (property_exists($block, 'error') && $block->error !== null) {
+                    $code = is_object($block->error) && property_exists($block->error, 'code') ? (string)$block->error->code : (string)$block->error;
+                    $toolErrors[] = ['tool' => (string)$block->type, 'code' => $code];
+                } else {
+                    $successfulToolResponses += 1;
+                }
+            }
+        }
+
+        // Рассчитать стоимость (копия cost)
+        $p = $config['pricing'] ?? [];
+        $inputPer = (float) ($p['input_per_mtok'] ?? 0.0);
+        $outputPer = (float) ($p['output_per_mtok'] ?? 0.0);
+        $cacheReadPer = (float) ($p['cache_read_per_mtok'] ?? 0.0);
+        $cacheWritePer = (float) ($p['cache_write_per_mtok'] ?? 0.0);
+
+        $cost = $inputTokens / 1_000_000 * $inputPer
+            + $outputTokens / 1_000_000 * $outputPer
+            + $cacheRead / 1_000_000 * $cacheReadPer
+            + $cacheWrite / 1_000_000 * $cacheWritePer;
+
+        return new ClaudeResult(
+            text: $text,
+            inputTokens: $inputTokens,
+            outputTokens: $outputTokens,
+            cacheReadTokens: (int)$cacheRead,
+            cacheWriteTokens: (int)$cacheWrite,
+            webSearches: (int)$searches,
+            stopReason: $message->stopReason ?? null,
+            costUsd: $cost,
+            toolErrors: $toolErrors,
+            successfulToolResponses: $successfulToolResponses,
+        );
+    }
+
 }

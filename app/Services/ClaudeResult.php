@@ -19,6 +19,9 @@ final readonly class ClaudeResult
         public int $webSearches,
         public ?string $stopReason,
         public float $costUsd,
+        /** @var array<int, array{tool:string, code:string, message?:string}> */
+        public array $toolErrors = [],
+        public int $successfulToolResponses = 0,
     ) {}
 
     /**
