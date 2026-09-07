@@ -53,7 +53,8 @@ return [
     'pricing' => [
         'input_per_mtok' => (float) env('TEXTGEN_PRICE_INPUT', 5.00),
         'output_per_mtok' => (float) env('TEXTGEN_PRICE_OUTPUT', 25.00),
-        'cache_write_per_mtok' => (float) env('TEXTGEN_PRICE_CACHE_WRITE', 6.25),
+        // cache write — по умолчанию 2x от input_per_mtok (5.00 * 2 = 10.00)
+        'cache_write_per_mtok' => (float) env('TEXTGEN_PRICE_CACHE_WRITE', 10.00),
         'cache_read_per_mtok' => (float) env('TEXTGEN_PRICE_CACHE_READ', 0.50),
     ],
 

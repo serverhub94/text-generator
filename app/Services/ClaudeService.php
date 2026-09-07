@@ -39,41 +39,6 @@ final class ClaudeService implements TextModel
     /**
      * @param  list<array{role: string, content: mixed}>  $messages
      */
-    public function send0(
-        string $rules,
-        array $messages,
-        string $effort,
-        int $maxTokens,
-        bool $withWebTools = false,
-        ?string $geo = null,
-    ): ClaudeResult {
-        $stream = $this->client->messages->createStream(
-            maxTokens: $maxTokens,
-            messages: $messages,
-            model: (string) $this->config['model'],
-            // Кешируем растущий префикс переписки: SDK ставит точку разрыва
-            // на последний кешируемый блок, поэтому каждая следующая стадия
-            // читает предыдущие из кеша вместо повторной оплаты.
-            cacheControl: ['type' => 'ephemeral'],
-            outputConfig: ['effort' => $effort],
-            // Правила неизменны в пределах рынка — это стабильный префикс.
-            system: [
-                ['type' => 'text', 'text' => $rules],
-            ],
-            thinking: ['type' => 'adaptive'],
-            tools: $withWebTools ? $this->webTools($geo) : null,
-        );
-
-        $accumulator = MessageAccumulator::forMessages();
-
-        foreach ($stream as $event) {
-            $accumulator->accumulate($event);
-        }
-
-        $message = $accumulator->message();
-
-        return $this->toResult($message);
-    }
 
     /**
      * @param  list<array{role: string, content: mixed}>  $messages
@@ -113,7 +78,7 @@ final class ClaudeService implements TextModel
                 maxTokens: $maxTokens,
                 messages: $currentMessages,
                 model: (string) $this->config['model'],
-                cacheControl: ['type' => 'ephemeral'],
+                cacheControl: ['type' => 'ephemeral', 'ttl' => '1h'],
                 outputConfig: ['effort' => $effort],
                 system: [
                     ['type' => 'text', 'text' => $rules],
