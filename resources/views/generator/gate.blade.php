@@ -4,7 +4,7 @@
 
 @section('content')
     <div class="card" style="max-width:420px">
-        <form method="post">
+        <form method="post" action="{{ route('access.post') }}">
             @csrf
             <label for="access_code">Код доступа</label>
             <input type="text" id="access_code" name="access_code" autofocus autocomplete="off">
@@ -17,3 +17,4 @@
         </form>
     </div>
 @endsection
+

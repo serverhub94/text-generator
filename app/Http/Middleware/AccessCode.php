@@ -17,26 +17,27 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class AccessCode
 {
+
     public function handle(Request $request, Closure $next): Response
     {
         $code = (string) config('textgen.limits.access_code');
 
+        // Если код не задан — доступ открыт
         if ($code === '') {
             return $next($request);
         }
 
+        // Если уже в сессии — пропускаем
         if ($request->session()->get('textgen_access') === $code) {
             return $next($request);
         }
 
-        if ($request->isMethod('post') && $request->input('access_code') === $code) {
-            $request->session()->put('textgen_access', $code);
+        // Сохраняем целевой URL, чтобы после входа вернуть пользователя
+        $request->session()->put('url.intended', $request->fullUrl());
 
-            return redirect($request->fullUrl());
-        }
-
+        // Показываем форму ввода кода. Форма отправляет POST на /access.
         return response()->view('generator.gate', [
-            'failed' => $request->isMethod('post'),
+            'failed' => false,
         ], 401);
     }
 }
