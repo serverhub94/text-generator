@@ -83,13 +83,28 @@ class RunPipeline implements ShouldQueue
         ]);
     }
 
+
     public function failed(?Throwable $e): void
     {
-        Run::where('id', $this->runId)->update([
+        $run = Run::find($this->runId);
+        if ($run === null) {
+            return;
+        }
+
+        // Если уже DONE — ничего не делаем
+        if ($run->status === Run::STATUS_DONE) {
+            return;
+        }
+
+        $run->forceFill([
             'status' => Run::STATUS_FAILED,
             'stage' => null,
             'error' => $e?->getMessage() ?? 'Неизвестная ошибка.',
             'finished_at' => now(),
-        ]);
+        ])->save();
+
+        //Log::error('RunPipeline failed', ['run_id' => $this->runId, 'error' => $e?->getMessage()]);
     }
+
+
 }
