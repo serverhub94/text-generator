@@ -16,7 +16,11 @@
                 @foreach($run->warnings as $w)
                     <li>
                         <strong>{{ $w['stage'] ?? 'stage' }}</strong>:
-                        {{ $w['message'] ?? ($w['reason'] ?? 'warning') }}
+                        @if(($w['reason'] ?? '') === 'empty_article')
+                            Пустая статья: финальная разметка оказалась пустой и не будет показана или скачана.
+                        @else
+                            {{ $w['message'] ?? ($w['reason'] ?? 'warning') }}
+                        @endif
                         @if(!empty($w['time']))
                             <small class="text-muted">— {{ $w['time'] }}</small>
                         @endif
@@ -68,17 +72,21 @@
 
     @if ($run->status === 'done')
         @php
-            $tabs = array_filter([
-                'article' => 'Текст',
-                'brief' => 'ТЗ',
-                'research' => 'Исследование',
-                'audit' => 'Аудит',
-                'paa' => 'PAA',
-                'entities' => 'Сущности',
-                'masterplan' => 'Мастер-план',
-            ], fn ($_, $key) => $key === 'article'
-                ? $run->article !== null
-                : $run->stageOutput($key) !== null, ARRAY_FILTER_USE_BOTH);
+            // Есть статья только если она не null и не пустая строка после trim
+        $hasArticle = $run->article !== null && trim((string) $run->article) !== '';
+
+        $tabs = array_filter([
+        'article' => 'Текст',
+        'brief' => 'ТЗ',
+        'research' => 'Исследование',
+        'audit' => 'Аудит',
+        'paa' => 'PAA',
+        'entities' => 'Сущности',
+        'masterplan' => 'Мастер-план',
+    ], fn ($_, $key) => $key === 'article'
+        ? $hasArticle
+        : $run->stageOutput($key) !== null, ARRAY_FILTER_USE_BOTH);
+
         @endphp
 
         <div class="card">

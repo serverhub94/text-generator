@@ -167,9 +167,25 @@ final class Pipeline
         // что вставляется в CMS.
         $article = ArticleDocument::parse($outputs['article'] ?? '');
 
-        if (isset($outputs['article'])) {
-            $outputs['article'] = $article->html;
+
+        // Получаем строку html безопасно
+        $articleHtml = trim((string) $article->html);
+
+        if ($articleHtml === '') {
+            // Парсер очистил разметку — фиксируем предупреждение и помечаем отсутствие статьи
+            $warnings[] = [
+                'stage' => 'article',
+                'reason' => 'empty_article',
+                'message' => 'Article markup is empty after parsing; no article will be shown or downloadable.',
+                'time' => (string) now(),
+            ];
+
+            // Явно помечаем отсутствие статьи в outputs
+            $outputs['article'] = null;
+        } else {
+            $outputs['article'] = $articleHtml;
         }
+
 
         return [
             'stages' => $outputs,
