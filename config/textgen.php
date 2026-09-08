@@ -76,6 +76,11 @@ return [
             'effort' => 'low',
             'max_tokens' => 16000,
             'research' => false,
+            // Оценка: сколько токенов примерно уйдёт на input/output
+            'estimated_tokens' => [
+                'input' => 2000,   // пример: 2k input tokens
+                'output' => 12000, // пример: 12k output tokens
+            ],
         ],
 
         'v2' => [
@@ -86,6 +91,11 @@ return [
             'effort' => 'medium',
             'max_tokens' => 24000,
             'research' => false,
+            // Оценка: сколько токенов примерно уйдёт на input/output
+            'estimated_tokens' => [
+                'input' => 2000,   // пример: 2k input tokens
+                'output' => 12000, // пример: 12k output tokens
+            ],
         ],
 
         'v3' => [
@@ -96,6 +106,11 @@ return [
             'effort' => 'high',
             'max_tokens' => 32000,
             'research' => true,
+            // Оценка: сколько токенов примерно уйдёт на input/output
+            'estimated_tokens' => [
+                'input' => 2000,   // пример: 2k input tokens
+                'output' => 12000, // пример: 12k output tokens
+            ],
         ],
 
         'v4' => [
@@ -108,6 +123,11 @@ return [
             'research' => true,
             'rewrites' => 2,
             'originality_threshold' => 80,
+            // Оценка: сколько токенов примерно уйдёт на input/output
+            'estimated_tokens' => [
+                'input' => 2000,   // пример: 2k input tokens
+                'output' => 12000, // пример: 12k output tokens
+            ],
         ],
 
         'v5' => [
@@ -121,6 +141,11 @@ return [
             'rewrites' => 2,
             'originality_threshold' => 80,
             'require_responsible_gambling' => true,
+            // Оценка: сколько токенов примерно уйдёт на input/output
+            'estimated_tokens' => [
+                'input' => 2000,   // пример: 2k input tokens
+                'output' => 12000, // пример: 12k output tokens
+            ],
         ],
 
         'v6' => [
@@ -133,6 +158,11 @@ return [
             'research' => true,
             'editorial' => true,
             'require_responsible_gambling' => true,
+            // Оценка: сколько токенов примерно уйдёт на input/output
+            'estimated_tokens' => [
+                'input' => 2000,   // пример: 2k input tokens
+                'output' => 12000, // пример: 12k output tokens
+            ],
         ],
 
         'v7' => [
@@ -144,6 +174,11 @@ return [
             'max_tokens' => 64000,
             'research' => true,
             'mono' => true,
+            // Оценка: сколько токенов примерно уйдёт на input/output
+            'estimated_tokens' => [
+                'input' => 2000,   // пример: 2k input tokens
+                'output' => 12000, // пример: 12k output tokens
+            ],
         ],
     ],
 ];

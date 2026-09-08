@@ -7,10 +7,12 @@
         @php
             $fraction = $budget->fraction();
             $class = $fraction >= 1 ? 'err' : ($fraction >= 0.8 ? 'warn' : '');
+            $reserved = $budget->reserved();
         @endphp
         <div class="budget">
             Бюджет месяца: {{ number_format($budget->spentThisMonth(), 2) }} /
             {{ number_format($budget->budget(), 2) }} USD
+            <small> (резерв: {{ number_format($reserved, 2) }} USD)</small>
             <span class="bar"><i class="{{ $class }}" style="width: {{ round($fraction * 100) }}%"></i></span>
         </div>
     @endunless
