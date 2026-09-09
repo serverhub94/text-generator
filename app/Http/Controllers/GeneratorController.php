@@ -18,13 +18,6 @@ class GeneratorController extends Controller
 {
     public function __construct(private readonly BudgetGuard $budget) {}
 
-    public function index0(): View
-    {
-        return view('generator.index', [
-            'modes' => config('textgen.modes'),
-            'budget' => $this->budget,
-        ]);
-    }
 
     // CHANGES: app/Http/Controllers/GeneratorController.php (метод index)
     public function index(): View
