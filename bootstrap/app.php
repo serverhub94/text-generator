@@ -15,13 +15,13 @@ return Application::configure(basePath: dirname(__DIR__))
         //
 
     })
-/*    ->withExceptions(function (Exceptions $exceptions): void {
+    ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
-    })*/
+    })
 // Внимание !!!! решает проблему ошибки 500 подключает понятную ошибку дебагер Spatie
-    ->withExceptions(function (Exceptions $exceptions) {
+ /*   ->withExceptions(function (Exceptions $exceptions) {
         // Патч для дебаггера: ловим ошибки Blade на Windows до падения сервера в 500
         if (config('app.debug') && !request()->expectsJson()) {
             $exceptions->reportable(function (\Throwable $e) {
@@ -33,6 +33,6 @@ return Application::configure(basePath: dirname(__DIR__))
                 }
             });
         }
-    })
+    })*/
     ->create();
 

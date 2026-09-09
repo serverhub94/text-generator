@@ -197,7 +197,8 @@ return [
                 'cache_write' => 0.000001,
             ],
             'effort' => ['low', 'medium', 'high'],
-            'thinking' => ['none', 'short', 'long'],
+            'thinking' => 'none',               // текущее значение
+            'thinking_options' => ['none','short','long'], // допустимые варианты
             'web_tools' => 'full', // 'full' | 'limited' | 'none'
             'max_output_tokens' => 64000,
             'context_tokens' => 131072,
@@ -215,7 +216,8 @@ return [
                 'cache_write' => 0.000001,
             ],
             'effort' => ['low', 'medium'],
-            'thinking' => ['none', 'short'],
+            'thinking' => 'none',               // текущее значение
+            'thinking_options' => ['none','short','long'], // допустимые варианты
             'web_tools' => 'limited',
             'max_output_tokens' => 32000,
             'context_tokens' => 65536,
@@ -233,7 +235,8 @@ return [
                 'cache_write' => 0.0000005,
             ],
             'effort' => ['low'],
-            'thinking' => ['none'],
+            'thinking' => 'none',               // текущее значение
+            'thinking_options' => ['none','short','long'], // допустимые варианты
             'web_tools' => 'none',
             'max_output_tokens' => 8000,
             'context_tokens' => 16384,

@@ -94,7 +94,7 @@ final class ClaudeService implements TextModel
             if ($profile !== null) {
                 $thinking = $profile->thinking();
                 if ($thinking !== '' && $thinking !== 'none') {
-                    // map profile thinking to SDK shape; here we pass ['type' => $thinking]
+                    // CHANGES: map profile thinking to SDK shape; here we pass ['type' => $thinking]
                     $thinkingParam = ['type' => $thinking];
                 } else {
                     // profile explicitly requests no thinking param -> leave null (do not send)
@@ -105,22 +105,39 @@ final class ClaudeService implements TextModel
                 $thinkingParam = ['type' => 'adaptive'];
             }
 
-            // outputConfig: include maxOutputTokens only if model supports it (maxOut > 0)
+            //
+            // CHANGES: build output_config in snake_case and sanitize by whitelist
+            // - Avoid sending camelCase keys like maxOutputTokens which Anthropic rejects.
+            // - Do not include 'effort' unless API documents it; sending unknown keys causes 400.
+            //
             $outputConfigParam = null;
             if ($profile !== null) {
                 $maxOut = $profile->maxTokensFor($maxTokens);
+
+                $raw = [];
+
                 if ($maxOut > 0) {
-                    // model supports limiting output tokens
-                    $outputConfigParam = ['effort' => $effort, 'maxOutputTokens' => $maxOut];
-                } else {
-                    // model does not support maxOutputTokens; include minimal effort or omit entirely
-                    // we include effort only to preserve previous semantics; if you prefer to omit
-                    // outputConfig entirely for unsupported models, set $outputConfigParam = null;
-                    $outputConfigParam = ['effort' => $effort];
+                    // IMPORTANT: snake_case key expected by API
+                    $raw['max_output_tokens'] = (int) $maxOut;
+                }
+
+                // Whitelist: перечислите здесь только те ключи, которые поддерживает ваш эндпойнт Anthropic.
+                // Если вы не уверены — оставьте только max_output_tokens.
+                $allowed = [
+                    'max_output_tokens',
+                    'temperature',
+                    'top_p',
+                    'stop_sequences',
+                    // добавьте другие официально поддерживаемые поля при необходимости
+                ];
+
+                $outputConfigParam = array_intersect_key($raw, array_flip($allowed));
+
+                if (empty($outputConfigParam)) {
+                    $outputConfigParam = null;
                 }
             } else {
-                // no profile -> legacy behaviour: include effort
-                $outputConfigParam = ['effort' => $effort];
+                $outputConfigParam = null;
             }
 
             // tools: include only when requested and model allows web tools
@@ -139,27 +156,50 @@ final class ClaudeService implements TextModel
             //
             // --- CREATE STREAM (SDK CALL) ---
             //
-            // NOTE:
-            // - The original code used named arguments. We keep named args and pass
-            //   conditional params as null when they should be omitted. Many SDKs
-            //   ignore null optional params; if your SDK treats null as "present",
-            //   you may need to adapt to call_user_func_array or SDK-specific builder.
+            // CHANGES:
+            // - Log payload for debugging.
+            // - Call SDK without outputConfig when it is null to avoid SDK serializing null as an empty object.
             //
-            $stream = $this->client->messages->createStream(
-                maxTokens: $maxTokens,
-                messages: $currentMessages,
-                model: $modelName,
-                cacheControl: ['type' => 'ephemeral', 'ttl' => '1h'],
-                // outputConfig: may be null if model/profile indicates omission
-                outputConfig: $outputConfigParam,
-                system: [
-                    ['type' => 'text', 'text' => $rules],
-                ],
-                // thinking: may be null to avoid sending unsupported param
-                thinking: $thinkingParam,
-                // tools: may be null to avoid sending unsupported param
-                tools: $toolsParam,
-            );
+            \Log::debug('Anthropic request params', [
+                'model' => $modelName,
+                'maxTokens' => $maxTokens,
+                'output_config' => $outputConfigParam,
+                'thinking' => $thinkingParam,
+                'tools' => $toolsParam,
+            ]);
+
+            // Некоторые SDK могут сериализовать null как присутствующий объект.
+            // Чтобы гарантированно опустить параметр, делаем два варианта вызова.
+            if ($outputConfigParam === null) {
+                $stream = $this->client->messages->createStream(
+                    maxTokens: $maxTokens,
+                    messages: $currentMessages,
+                    model: $modelName,
+                    cacheControl: ['type' => 'ephemeral', 'ttl' => '1h'],
+                    system: [
+                        ['type' => 'text', 'text' => $rules],
+                    ],
+                    // thinking: may be null to avoid sending unsupported param
+                    thinking: $thinkingParam,
+                    // tools: may be null to avoid sending unsupported param
+                    tools: $toolsParam,
+                );
+            } else {
+                $stream = $this->client->messages->createStream(
+                    maxTokens: $maxTokens,
+                    messages: $currentMessages,
+                    model: $modelName,
+                    cacheControl: ['type' => 'ephemeral', 'ttl' => '1h'],
+                    outputConfig: $outputConfigParam,
+                    system: [
+                        ['type' => 'text', 'text' => $rules],
+                    ],
+                    // thinking: may be null to avoid sending unsupported param
+                    thinking: $thinkingParam,
+                    // tools: may be null to avoid sending unsupported param
+                    tools: $toolsParam,
+                );
+            }
 
             $accumulator = MessageAccumulator::forMessages();
 
@@ -249,6 +289,7 @@ final class ClaudeService implements TextModel
 
         return $result;
     }
+
 
 
     /**

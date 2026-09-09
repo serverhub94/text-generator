@@ -77,6 +77,10 @@ class ModelProfile
         return $this->cfg['thinking'] ?? 'none';
     }
 
+
+
+
+
     public function webTools(): string
     {
         return $this->cfg['web_tools'] ?? 'none';
