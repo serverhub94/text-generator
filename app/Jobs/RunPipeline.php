@@ -20,6 +20,9 @@ use Throwable;
  * - Подписываемся на onStageDone и сохраняем промежуточные результаты в БД
  *   после каждой стадии (stages, usage, cost_usd).
  * - Финальное обновление сохраняет warnings, если они есть.
+ * - CHANGES: фиксируем модель для прогона — если в записи Run есть поле model,
+ *   оно копируется в $input['model'] перед вызовом Pipeline::run().
+ *   Это запрещает смену модели внутри прогона.
  */
 class RunPipeline implements ShouldQueue
 {
@@ -35,6 +38,15 @@ class RunPipeline implements ShouldQueue
 
     public function __construct(public readonly int $runId) {}
 
+    /**
+     * Выполнение job.
+     *
+     * CHANGES (ключевые):
+     * - Берём Run::find($this->runId).
+     * - Формируем $input = $run->input; если $run->model задан — устанавливаем $input['model'] = $run->model.
+     * - Передаём этот $input в Pipeline::run($input). Таким образом модель фиксируется
+     *   и Pipeline не будет брать модель из внешних/временных параметров.
+     */
     public function handle(Pipeline $pipeline): void
     {
         $run = Run::find($this->runId);
@@ -66,8 +78,23 @@ class RunPipeline implements ShouldQueue
             ])->save();
         });
 
+        // -----------------------
+        // CHANGES: фиксируем модель в input перед запуском Pipeline
+        // -----------------------
+        // Берём исходный input из записи прогона (массив), затем, если в записи Run
+        // есть поле model (сохранённое при создании прогона), принудительно ставим
+        // его в $input['model']. Это гарантирует, что Pipeline увидит именно ту модель,
+        // которая была зафиксирована при создании прогона.
+        $input = is_array($run->input) ? $run->input : (array) $run->input;
+
+        if (!empty($run->model)) {
+            // CHANGES: принудительно устанавливаем модель из записи Run
+            $input['model'] = $run->model;
+        }
+        // -----------------------
+
         // Запускаем pipeline — он вернёт текущие накопленные данные (включая warnings)
-        $result = $pipeline->run($run->input);
+        $result = $pipeline->run($input);
 
         // Обновляем финальные поля (включая warnings, если есть)
         $run->update([
@@ -105,6 +132,4 @@ class RunPipeline implements ShouldQueue
 
         //Log::error('RunPipeline failed', ['run_id' => $this->runId, 'error' => $e?->getMessage()]);
     }
-
-
 }

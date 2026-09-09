@@ -18,7 +18,7 @@ class GeneratorController extends Controller
 {
     public function __construct(private readonly BudgetGuard $budget) {}
 
-    public function index(): View
+    public function index0(): View
     {
         return view('generator.index', [
             'modes' => config('textgen.modes'),
@@ -26,6 +26,54 @@ class GeneratorController extends Controller
         ]);
     }
 
+    // CHANGES: app/Http/Controllers/GeneratorController.php (метод index)
+    public function index(): View
+    {
+        // Получаем конфиг моделей
+        $models = config('textgen.models', []);
+
+        // 1) Попробуем взять явно указанный дефолт в конфиге
+        $default = config('textgen.default_model') ?? null;
+
+        // 2) Если не указан, ищем модель с флагом 'default'
+        if ($default === null) {
+            foreach ($models as $k => $m) {
+                if (!empty($m['default'])) {
+                    $default = $k;
+                    break;
+                }
+            }
+        }
+
+        // 3) Если всё ещё нет — берём первую enabled модель
+        if ($default === null) {
+            foreach ($models as $k => $m) {
+                if (!empty($m['enabled'])) {
+                    $default = $k;
+                    break;
+                }
+            }
+        }
+
+        return view('generator.index', [
+            'modes' => config('textgen.modes'),
+            'budget' => $this->budget,
+            'models' => $models,           // CHANGES: список моделей для селектора
+            'defaultModel' => $default,    // CHANGES: дефолт для view
+        ]);
+    }
+
+
+    /**
+     * Создать новый прогон.
+     *
+     * CHANGES:
+     * - Фиксируем модель при создании прогона и сохраняем её в поле runs.model.
+     * - Логика выбора модели (приоритет): request->model -> config('textgen.default_model')
+     *   -> модель с 'default' -> первая enabled модель.
+     * - Это запрещает менять модель внутри одного прогона: далее Pipeline должен
+     *   брать модель из записи Run, а не из входных параметров.
+     */
     public function store(StoreRunRequest $request): RedirectResponse
     {
         if ($this->budget->exceeded()) {
@@ -41,18 +89,62 @@ class GeneratorController extends Controller
                 ]);
         }
 
+        // -----------------------
+        // CHANGES: определяем ключ модели для прогона
+        // -----------------------
+        // Приоритет: явный выбор в форме -> config default_model -> модель с 'default' -> первая enabled
+        $selectedModel = $request->input('model', null);
+
+        if ($selectedModel === null) {
+            $selectedModel = config('textgen.default_model') ?? null;
+        }
+
+        if ($selectedModel === null) {
+            $modelsCfg = config('textgen.models', []);
+            foreach ($modelsCfg as $k => $m) {
+                if (!empty($m['default'])) {
+                    $selectedModel = $k;
+                    break;
+                }
+            }
+        }
+
+        if ($selectedModel === null) {
+            $modelsCfg = config('textgen.models', []);
+            foreach ($modelsCfg as $k => $m) {
+                if (!empty($m['enabled'])) {
+                    $selectedModel = $k;
+                    break;
+                }
+            }
+        }
+
+        // Если всё ещё null — оставляем null (Pipeline/Job должен обработать отсутствие модели)
+        // Но лучше сохранять явно null, чтобы было видно, что модель не задана.
+        // -----------------------
+
         $run = Run::create([
             'status' => Run::STATUS_QUEUED,
             'mode' => $request->string('mode')->value(),
             'input' => $request->safe()->all(),
             'ip' => $request->ip(),
+            // CHANGES: сохраняем выбранную модель в таблице runs.model
+            'model' => $selectedModel,
         ]);
 
+        // Запускаем job; RunPipeline в своей логике должен брать модель из $run->model
         RunPipeline::dispatch($run->id);
 
         return redirect()->route('runs.show', $run);
     }
 
+    /**
+     * Показать страницу прогона.
+     *
+     * Замечание:
+     * - Для отображения мы используем $run->mode и конфиг режима.
+     * - Модель уже сохранена в $run->model и будет использована при выполнении Pipeline.
+     */
     public function show(Run $run): View
     {
         return view('generator.show', [
@@ -81,7 +173,7 @@ class GeneratorController extends Controller
      * самостоятельными деливерингами, не только статья.
      *
      * Статья уходит как .html: это готовый фрагмент для вставки между <body>
-     * и </body>, остальные стадии — рабочие документы в markdown.
+     * и </body', остальные стадии — рабочие документы в markdown.
      */
     public function download(Run $run, string $part): Response
     {

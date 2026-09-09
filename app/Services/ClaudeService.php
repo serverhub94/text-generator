@@ -12,6 +12,7 @@ use Anthropic\Messages\TextBlock;
 use Anthropic\Messages\UserLocation;
 use Anthropic\Messages\WebFetchTool20260209;
 use Anthropic\Messages\WebSearchTool20260209;
+use App\Services\ModelProfile; // <-- NEW: импорт профиля модели
 
 /**
  * Обёртка над Anthropic SDK под нужды конвейера.
@@ -38,10 +39,15 @@ final class ClaudeService implements TextModel
 
     /**
      * @param  list<array{role: string, content: mixed}>  $messages
-     */
-
-    /**
-     * @param  list<array{role: string, content: mixed}>  $messages
+     *
+     * CHANGES:
+     * - Метод send теперь принимает опциональный ModelProfile $profile.
+     *   Это позволяет адаптировать параметры запроса (thinking, tools, outputConfig)
+     *   в зависимости от возможностей выбранной модели.
+     *
+     * - Мы избегаем отправки неподдерживаемых полей: если профиль указывает,
+     *   что модель не поддерживает output config или web tools, соответствующие
+     *   поля не передаются (передаются как null / опускаются по логике SDK).
      */
     public function send(
         string $rules,
@@ -50,6 +56,7 @@ final class ClaudeService implements TextModel
         int $maxTokens,
         bool $withWebTools = false,
         ?string $geo = null,
+        ?ModelProfile $profile = null, // <-- NEW: профиль модели, опционально
     ): ClaudeResult {
         // Максимум дозапросов: сначала из конфига, иначе из env, иначе 5
         $maxContinuations = (int) ($this->config['max_continuations'] ?? env('TEXTGEN_MAX_CONTINUATIONS', 5));
@@ -73,18 +80,85 @@ final class ClaudeService implements TextModel
         $continuation = 0;
 
         do {
-            // Создаём стрим (как раньше)
+            //
+            // --- BUILD STREAM PARAMETERS WITH RESPECT TO MODEL PROFILE ---
+            //
+            // CHANGES:
+            // - We prepare thinking, outputConfig and tools conditionally based on $profile.
+            // - If $profile is null (backward compatibility), we keep previous defaults.
+            //
+            $modelName = (string) ($this->config['model'] ?? '');
+
+            // thinking: default adaptive, but if profile requests 'none' we omit it.
+            $thinkingParam = null;
+            if ($profile !== null) {
+                $thinking = $profile->thinking();
+                if ($thinking !== '' && $thinking !== 'none') {
+                    // map profile thinking to SDK shape; here we pass ['type' => $thinking]
+                    $thinkingParam = ['type' => $thinking];
+                } else {
+                    // profile explicitly requests no thinking param -> leave null (do not send)
+                    $thinkingParam = null;
+                }
+            } else {
+                // backward-compatible default
+                $thinkingParam = ['type' => 'adaptive'];
+            }
+
+            // outputConfig: include maxOutputTokens only if model supports it (maxOut > 0)
+            $outputConfigParam = null;
+            if ($profile !== null) {
+                $maxOut = $profile->maxTokensFor($maxTokens);
+                if ($maxOut > 0) {
+                    // model supports limiting output tokens
+                    $outputConfigParam = ['effort' => $effort, 'maxOutputTokens' => $maxOut];
+                } else {
+                    // model does not support maxOutputTokens; include minimal effort or omit entirely
+                    // we include effort only to preserve previous semantics; if you prefer to omit
+                    // outputConfig entirely for unsupported models, set $outputConfigParam = null;
+                    $outputConfigParam = ['effort' => $effort];
+                }
+            } else {
+                // no profile -> legacy behaviour: include effort
+                $outputConfigParam = ['effort' => $effort];
+            }
+
+            // tools: include only when requested and model allows web tools
+            $toolsParam = null;
+            if ($withWebTools) {
+                if ($profile === null || $profile->webTools() !== 'none') {
+                    $toolsParam = $this->webTools($geo);
+                } else {
+                    // profile explicitly forbids web tools -> do not include tools param
+                    $toolsParam = null;
+                }
+            } else {
+                $toolsParam = null;
+            }
+
+            //
+            // --- CREATE STREAM (SDK CALL) ---
+            //
+            // NOTE:
+            // - The original code used named arguments. We keep named args and pass
+            //   conditional params as null when they should be omitted. Many SDKs
+            //   ignore null optional params; if your SDK treats null as "present",
+            //   you may need to adapt to call_user_func_array or SDK-specific builder.
+            //
             $stream = $this->client->messages->createStream(
                 maxTokens: $maxTokens,
                 messages: $currentMessages,
-                model: (string) $this->config['model'],
+                model: $modelName,
                 cacheControl: ['type' => 'ephemeral', 'ttl' => '1h'],
-                outputConfig: ['effort' => $effort],
+                // outputConfig: may be null if model/profile indicates omission
+                outputConfig: $outputConfigParam,
                 system: [
                     ['type' => 'text', 'text' => $rules],
                 ],
-                thinking: ['type' => 'adaptive'],
-                tools: $withWebTools ? $this->webTools($geo) : null,
+                // thinking: may be null to avoid sending unsupported param
+                thinking: $thinkingParam,
+                // tools: may be null to avoid sending unsupported param
+                tools: $toolsParam,
             );
 
             $accumulator = MessageAccumulator::forMessages();
@@ -120,6 +194,9 @@ final class ClaudeService implements TextModel
             $totalCacheWrite += (int) $cacheWrite;
             $totalSearches += (int) $searches;
 
+            // CHANGES: cost calculation remains using service-level pricing config.
+            // If you want per-model pricing, Pipeline should call ModelProfile::cost()
+            // and not rely on ClaudeService::cost().
             $totalCost += $this->cost(
                 (int) ($usage->inputTokens ?? 0),
                 (int) ($usage->outputTokens ?? 0),

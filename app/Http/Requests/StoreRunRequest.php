@@ -19,7 +19,11 @@ class StoreRunRequest extends FormRequest
      */
     public function rules(): array
     {
+        $models = array_keys(config('textgen.models', []));
+
         return [
+            // валидация модели LLM в каждом запросе
+            'model' => ['nullable', 'string', Rule::in($models)],
             'target_query' => ['required', 'string', 'max:200'],
 
             // Двухбуквенный код — тот же формат, в котором команда уже пишет

@@ -132,6 +132,22 @@
             </div>
         </div>
 
+        <div class="field">
+            <label for="model">Модель генерации</label>
+            <select name="model" id="model">
+                @foreach(config('textgen.models') as $key => $m)
+                    @if(!empty($m['enabled']))
+                        <option value="{{ $key }}" {{ old('model', $defaultModel) === $key ? 'selected' : '' }}>
+                            {{ $m['label'] }} — {{ $m['hint'] ?? '' }}
+                        </option>
+                    @endif
+                @endforeach
+            </select>
+            <small class="hint">Выберите модель. Тарифы и ограничения зависят от выбранной модели.</small>
+        </div>
+
+
+
         <div class="row">
             <button type="submit" class="primary" @disabled($budget->exceeded())>
                 Запустить генерацию

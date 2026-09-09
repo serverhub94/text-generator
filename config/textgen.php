@@ -18,6 +18,7 @@ return [
     'api_key' => env('ANTHROPIC_API_KEY', ''),
 
     'model' => env('TEXTGEN_MODEL', 'claude-opus-5'),
+    'default_model' => env('TEXTGEN_MODEL', 'claude-opus-5'),
 
     /*
      | Версии серверных инструментов Anthropic. Вынесены в конфиг, чтобы
@@ -179,6 +180,63 @@ return [
                 'input' => 2000,   // пример: 2k input tokens
                 'output' => 12000, // пример: 12k output tokens
             ],
+        ],
+    ],
+
+    'models' => [
+        'opus-5' => [
+            'label' => 'Opus 5',
+            'id' => 'opus-5',
+            'hint' => 'High quality, long context',
+            'default' => true,
+            'enabled' => true,
+            'pricing' => [
+                'input' => 0.00001,
+                'output' => 0.00002,
+                'cache_read' => 0.000001,
+                'cache_write' => 0.000001,
+            ],
+            'effort' => ['low', 'medium', 'high'],
+            'thinking' => ['none', 'short', 'long'],
+            'web_tools' => 'full', // 'full' | 'limited' | 'none'
+            'max_output_tokens' => 64000,
+            'context_tokens' => 131072,
+        ],
+        'sonnet-5' => [
+            'label' => 'Sonnet 5',
+            'id' => 'sonnet-5',
+            'hint' => 'Balanced cost/quality',
+            'default' => false,
+            'enabled' => true,
+            'pricing' => [
+                'input' => 0.000008,
+                'output' => 0.000015,
+                'cache_read' => 0.000001,
+                'cache_write' => 0.000001,
+            ],
+            'effort' => ['low', 'medium'],
+            'thinking' => ['none', 'short'],
+            'web_tools' => 'limited',
+            'max_output_tokens' => 32000,
+            'context_tokens' => 65536,
+        ],
+        'haiku-4-5' => [
+            'label' => 'Haiku 4-5',
+            'id' => 'haiku-4-5',
+            'hint' => 'Cheap, short context',
+            'default' => false,
+            'enabled' => true,
+            'pricing' => [
+                'input' => 0.000005,
+                'output' => 0.00001,
+                'cache_read' => 0.0000005,
+                'cache_write' => 0.0000005,
+            ],
+            'effort' => ['low'],
+            'thinking' => ['none'],
+            'web_tools' => 'none',
+            'max_output_tokens' => 8000,
+            'context_tokens' => 16384,
         ],
     ],
 ];

@@ -8,6 +8,7 @@ use App\Services\Contracts\TextModel;
 use App\Support\ArticleDocument;
 use App\Support\KeywordParser;
 use RuntimeException;
+use App\Services\ModelProfile; // CHANGES: импорт ModelProfile для фиксации и валидации модели
 
 /**
  * Прогоняет выбранный режим по стадиям.
@@ -16,6 +17,13 @@ use RuntimeException;
  * - Добавлен колбэк onStageDone для уведомления о завершении каждой стадии.
  * - При isTruncated() теперь не бросается исключение: стадия сохраняется частично,
  *   формируется предупреждение и конвейер корректно останавливается.
+ *
+ * CHANGES (в этом файле):
+ * - Фиксация модели в начале прогона (ModelProfile) и передача её в все вызовы claude->send.
+ * - Валидация суммарных токенов режима против context_tokens модели (80% threshold).
+ * - Запрет web-стадий для моделей с web_tools === 'none'.
+ * - Передача ModelProfile в rewriteIfRejected и все внутренние send.
+ * - Возвращаемое поле 'article' теперь берётся из outputs['article'] (null|string).
  */
 final class Pipeline
 {
@@ -74,7 +82,13 @@ final class Pipeline
 
     /**
      * @param  array<string, mixed>  $input
-     * @return array{stages: array<string, string>, article: string, article_meta: array<string, string>, usage: array<string, int>, cost: float, warnings: array<int, array>}
+     * @return array{stages: array<string, string|null>, article: string|null, article_meta: array<string, string>, usage: array<string, int>, cost: float, warnings: array<int, array>}
+     *
+     * CHANGES:
+     * - В начале прогона модель фиксируется и создаётся ModelProfile.
+     * - Выполняется валидация суммарных токенов режима против context_tokens модели (80%).
+     * - Запрещаются web-стадии для моделей с web_tools === 'none'.
+     * - ModelProfile передаётся в каждый вызов $this->claude->send(..., profile: $modelProfile).
      */
     public function run(array $input): array
     {
@@ -82,6 +96,73 @@ final class Pipeline
         $vars = $this->vars($input);
 
         $rules = $this->prompts->rules($vars);
+
+        // ---------------------------
+        // CHANGES: выбор и фиксация модели для всего прогона
+        // ---------------------------
+        // Приоритет: $input['model'] -> config['default_model'] -> модель с 'default' -> первая enabled
+        $modelKey = $input['model'] ?? null;
+
+        if ($modelKey === null) {
+            $modelKey = $this->config['default_model'] ?? null;
+        }
+
+        if ($modelKey === null && !empty($this->config['models'])) {
+            foreach ($this->config['models'] as $k => $m) {
+                if (!empty($m['default'])) {
+                    $modelKey = $k;
+                    break;
+                }
+            }
+        }
+
+        if ($modelKey === null && !empty($this->config['models'])) {
+            foreach ($this->config['models'] as $k => $m) {
+                if (!empty($m['enabled'])) {
+                    $modelKey = $k;
+                    break;
+                }
+            }
+        }
+
+        if ($modelKey === null) {
+            throw new RuntimeException('No model configured for text generation.');
+        }
+
+        // Создаём профиль модели (может бросить InvalidArgumentException при неизвестном ключе)
+        $modelProfile = ModelProfile::fromConfig($modelKey, $this->config);
+        // CHANGES: $modelProfile фиксирован для всего прогона — запрещаем менять модель внутри run()
+
+        // ---------------------------
+        // CHANGES: валидация суммарных токенов режима против context_tokens модели (80% threshold)
+        // ---------------------------
+        $totalModeTokens = 0;
+        foreach ($mode['stages'] as $s) {
+            $totalModeTokens += $this->tokensFor($s, $mode);
+        }
+
+        $contextTokens = $modelProfile->contextTokens();
+        if ($contextTokens > 0) {
+            $threshold = (int) floor($contextTokens * 0.8);
+            if ($totalModeTokens > $threshold) {
+                throw new RuntimeException(
+                    "Requested mode requires {$totalModeTokens} tokens which exceeds 80% ({$threshold}) of model '{$modelProfile->id()}' context ({$contextTokens}). Choose a model with larger context or a lighter mode."
+                );
+            }
+        }
+
+        // ---------------------------
+        // CHANGES: запрет web-стадий для моделей без web tools
+        // ---------------------------
+        if ($modelProfile->webTools() === 'none') {
+            foreach ($mode['stages'] as $s) {
+                if (in_array($s, self::WEB_STAGES, true)) {
+                    throw new RuntimeException("Model '{$modelProfile->id()}' does not support web tools; mode contains web stage '{$s}'. Choose another model or remove web stages.");
+                }
+            }
+        }
+
+        // ---------------------------
 
         $messages = [];
         $outputs = [];
@@ -103,6 +184,9 @@ final class Pipeline
                     : $instructions,
             ];
 
+            // ---------------------------
+            // CHANGES: передаём $modelProfile в каждый вызов claude->send
+            // ---------------------------
             $result = $this->claude->send(
                 rules: $rules,
                 messages: $messages,
@@ -110,6 +194,7 @@ final class Pipeline
                 maxTokens: $this->tokensFor($stage, $mode),
                 withWebTools: in_array($stage, self::WEB_STAGES, true),
                 geo: (string) $input['geo'],
+                profile: $modelProfile, // CHANGES: фиксированный профиль модели для всего прогона
             );
 
             // guardResult по-прежнему бросает исключения для отказов и пустых ответов
@@ -135,8 +220,6 @@ final class Pipeline
             $messages[] = ['role' => 'assistant', 'content' => $result->text];
             $outputs[$stage] = $result->text;
 
-
-
             // Накопление usage/cost
             $this->accumulate($usage, $cost, $result);
 
@@ -159,14 +242,14 @@ final class Pipeline
 
         // Аудит мог забраковать текст — режимы V4/V5 переписывают его.
         if (isset($outputs['audit'], $outputs['article']) && ($mode['rewrites'] ?? 0) > 0) {
-            $this->rewriteIfRejected($mode, $vars, $rules, $messages, $outputs, $usage, $cost, $warnings);
+            // CHANGES: передаём $modelProfile в rewriteIfRejected
+            $this->rewriteIfRejected($mode, $vars, $rules, $messages, $outputs, $usage, $cost, $warnings, $modelProfile);
         }
 
         // Статья — HTML-фрагмент, а мета и служебный блок к разметке не
         // относятся: их выносим отдельно, чтобы редактор копировал ровно то,
         // что вставляется в CMS.
         $article = ArticleDocument::parse($outputs['article'] ?? '');
-
 
         // Получаем строку html безопасно
         $articleHtml = trim((string) $article->html);
@@ -186,10 +269,10 @@ final class Pipeline
             $outputs['article'] = $articleHtml;
         }
 
-
+        // CHANGES: возвращаем article как то, что реально сохранено в outputs (null|string)
         return [
             'stages' => $outputs,
-            'article' => $article->html,
+            'article' => $outputs['article'], // CHANGES: ранее возвращался $article->html напрямую
             'article_meta' => [
                 'title' => $article->title,
                 'description' => $article->description,
@@ -206,7 +289,8 @@ final class Pipeline
      * Пока аудит выносит «НЕ ПРОШЁЛ», переписываем статью с его замечаниями
      * на руках — но не больше отведённого режимом числа попыток.
      *
-     * (Оставлена без изменений; при необходимости можно аналогично вызывать onStageDone внутри)
+     * CHANGES:
+     * - Добавлен параметр ModelProfile $profile и передача его в send() внутри.
      */
     private function rewriteIfRejected(
         array $mode,
@@ -217,15 +301,16 @@ final class Pipeline
         array &$usage,
         float &$cost,
         array &$warnings,
+        ModelProfile $profile, // CHANGES: профиль модели, фиксированный для прогона
     ): void {
         $attempts = (int) $mode['rewrites'];
 
         for ($attempt = 1; $attempt <= $attempts; $attempt++) {
 
             // меняем логику вердикта
-           /* if (! $this->auditRejected($outputs['audit'])) {
-                return;
-            }*/
+            /* if (! $this->auditRejected($outputs['audit'])) {
+                 return;
+             }*/
             $verdict = self::parseAuditVerdict($outputs['audit'] ?? '');
             if ($verdict === null) {
                 // Не распознали вердикт — не перезапускаем генерацию, а пишем предупреждение
@@ -259,11 +344,13 @@ final class Pipeline
                     .'либо поставь <strong>добавьте данные</strong>.',
             ];
 
+            // CHANGES: передаём $profile в send()
             $article = $this->claude->send(
                 rules: $rules,
                 messages: $messages,
                 effort: (string) $mode['effort'],
                 maxTokens: (int) $mode['max_tokens'],
+                profile: $profile,
             );
 
             $this->guardResult($article, 'rewrite');
@@ -282,11 +369,13 @@ final class Pipeline
                 'content' => $this->prompts->stage('audit', $vars),
             ];
 
+            // CHANGES: передаём $profile в audit send()
             $audit = $this->claude->send(
                 rules: $rules,
                 messages: $messages,
                 effort: (string) $mode['effort'],
                 maxTokens: self::STAGE_TOKENS['audit'],
+                profile: $profile,
             );
 
             $this->guardResult($audit, 'audit');
