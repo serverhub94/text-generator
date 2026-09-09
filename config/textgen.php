@@ -19,7 +19,7 @@ return [
 
     'model' => env('TEXTGEN_MODEL', 'claude-opus-5'),
     'default_model' => env('TEXTGEN_MODEL', 'claude-opus-5'),
-
+    'history_scope' => env('TEXTGEN_HISTORY_SCOPE', 'all'),
     /*
      | Версии серверных инструментов Anthropic. Вынесены в конфиг, чтобы
      | поднимать версию без правки кода, когда выходит новая.

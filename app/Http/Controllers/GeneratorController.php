@@ -13,14 +13,31 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\View\View;
+use Illuminate\Support\Str;
 
+/**
+ * GeneratorController
+ *
+ * CHANGES (summary):
+ * - Добавлены методы history() и destroy().
+ * - index() теперь поддерживает параметр from={uuid} для предзаполнения формы (повтор).
+ * - store() сохраняет denorm поля: model, target_query, session_id.
+ * - Все изменения подписаны комментариями CHANGES.
+ */
 class GeneratorController extends Controller
 {
     public function __construct(private readonly BudgetGuard $budget) {}
 
-
-    // CHANGES: app/Http/Controllers/GeneratorController.php (метод index)
-    public function index(): View
+    /**
+     * Форма создания прогона.
+     *
+     * CHANGES:
+     * - Метод принимает Request, поддерживает ?from={uuid} для предзаполнения формы.
+     * - Передаёт в view список моделей и defaultModel.
+     *
+     * @param Request $request
+     */
+    public function index(Request $request): View
     {
         // Получаем конфиг моделей
         $models = config('textgen.models', []);
@@ -48,24 +65,33 @@ class GeneratorController extends Controller
             }
         }
 
+        // CHANGES: поддержка ?from={uuid} — если указан, подгружаем run и передаём input для prefill
+        $prefill = [];
+        $from = $request->query('from');
+        if ($from) {
+            $run = Run::where('uuid', $from)->first();
+            if ($run !== null) {
+                $prefill = is_array($run->input) ? $run->input : (array) $run->input;
+            }
+        }
+
         return view('generator.index', [
             'modes' => config('textgen.modes'),
             'budget' => $this->budget,
             'models' => $models,           // CHANGES: список моделей для селектора
             'defaultModel' => $default,    // CHANGES: дефолт для view
+            'prefill' => $prefill,         // CHANGES: данные для предзаполнения формы (повтор)
         ]);
     }
-
 
     /**
      * Создать новый прогон.
      *
      * CHANGES:
      * - Фиксируем модель при создании прогона и сохраняем её в поле runs.model.
-     * - Логика выбора модели (приоритет): request->model -> config('textgen.default_model')
-     *   -> модель с 'default' -> первая enabled модель.
-     * - Это запрещает менять модель внутри одного прогона: далее Pipeline должен
-     *   брать модель из записи Run, а не из входных параметров.
+     * - Сохраняем денормализованный target_query (varchar 200) и session_id.
+     *
+     * @param StoreRunRequest $request
      */
     public function store(StoreRunRequest $request): RedirectResponse
     {
@@ -111,10 +137,13 @@ class GeneratorController extends Controller
                 }
             }
         }
-
-        // Если всё ещё null — оставляем null (Pipeline/Job должен обработать отсутствие модели)
-        // Но лучше сохранять явно null, чтобы было видно, что модель не задана.
         // -----------------------
+
+        // CHANGES: денормализованный target_query (varchar 200) для быстрого поиска
+        $targetQuery = trim((string) $request->input('target_query', ''));
+
+        // CHANGES: session_id — фиксируем идентификатор сессии для разграничения видимости
+        $sessionId = session()->getId();
 
         $run = Run::create([
             'status' => Run::STATUS_QUEUED,
@@ -123,6 +152,10 @@ class GeneratorController extends Controller
             'ip' => $request->ip(),
             // CHANGES: сохраняем выбранную модель в таблице runs.model
             'model' => $selectedModel,
+            // CHANGES: сохраняем денормализованный целевой запрос
+            'target_query' => Str::limit($targetQuery, 200),
+            // CHANGES: сохраняем идентификатор сессии
+            'session_id' => $sessionId,
         ]);
 
         // Запускаем job; RunPipeline в своей логике должен брать модель из $run->model
@@ -132,11 +165,89 @@ class GeneratorController extends Controller
     }
 
     /**
-     * Показать страницу прогона.
+     * Страница истории прогона (GET /history).
      *
-     * Замечание:
-     * - Для отображения мы используем $run->mode и конфиг режима.
-     * - Модель уже сохранена в $run->model и будет использована при выполнении Pipeline.
+     * CHANGES:
+     * - Пагинация 25 записей, сортировка created_at desc.
+     * - Фильтры: status, mode, model, q (по target_query и input.target_query).
+     * - Видимость: учитывается config('textgen.history_scope') = 'session'|'all'.
+     *
+     * @param Request $request
+     */
+    public function history(Request $request): View
+    {
+        $query = Run::query()->orderByDesc('created_at');
+
+        // CHANGES: scope видимости (session|all)
+        $scope = config('textgen.history_scope', 'session');
+        if ($scope === 'session') {
+            $query->where('session_id', session()->getId());
+        }
+
+        // Фильтры
+        if ($status = $request->query('status')) {
+            $query->where('status', $status);
+        }
+        if ($mode = $request->query('mode')) {
+            $query->where('mode', $mode);
+        }
+        if ($model = $request->query('model')) {
+            $query->where('model', $model);
+        }
+        if ($q = trim((string) $request->query('q', ''))) {
+            // Поиск по денормализованному target_query и по input.target_query
+            $query->where(function ($qb) use ($q) {
+                $qb->where('target_query', 'like', "%{$q}%")
+                    ->orWhere('input->target_query', 'like', "%{$q}%");
+            });
+        }
+
+        $runs = $query->paginate(25)->withQueryString();
+
+        // Для фильтров в UI: статусы, режимы, модели
+        $statuses = [
+            Run::STATUS_QUEUED => 'Queued',
+            Run::STATUS_RUNNING => 'Running',
+            Run::STATUS_DONE => 'Done',
+            Run::STATUS_FAILED => 'Failed',
+        ];
+        $modes = config('textgen.modes', []);
+        $models = config('textgen.models', []);
+
+        return view('generator.history', [
+            'runs' => $runs,
+            'statuses' => $statuses,
+            'modes' => $modes,
+            'models' => $models,
+            'scope' => $scope,
+        ]);
+    }
+
+    /**
+     * Удаление прогона (DELETE /run/{run}).
+     *
+     * CHANGES:
+     * - Разрешено удалять только прогоны, принадлежащие текущей сессии,
+     *   если history_scope = 'session'. Прямые ссылки на задачу остаются доступными для просмотра.
+     *
+     * @param Run $run
+     */
+    public function destroy(Run $run): RedirectResponse
+    {
+        $scope = config('textgen.history_scope', 'session');
+
+        // Если scope = session, проверяем принадлежность сессии
+        if ($scope === 'session' && ! $run->isOwnedBySession(session()->getId())) {
+            return back()->withErrors(['run' => 'Вы не можете удалять этот прогон.']);
+        }
+
+        $run->delete();
+
+        return redirect()->route('runs.index')->with('status', 'Run deleted');
+    }
+
+    /**
+     * Показать страницу прогона.
      */
     public function show(Run $run): View
     {
@@ -164,9 +275,6 @@ class GeneratorController extends Controller
     /**
      * Отдаём стадию отдельным файлом — ресёрч-отчёт и ТЗ являются
      * самостоятельными деливерингами, не только статья.
-     *
-     * Статья уходит как .html: это готовый фрагмент для вставки между <body>
-     * и </body', остальные стадии — рабочие документы в markdown.
      */
     public function download(Run $run, string $part): Response
     {
@@ -187,8 +295,6 @@ class GeneratorController extends Controller
         $filename = "{$slug}-{$part}.{$extension}";
 
         return response($content, 200, [
-            // Фрагмент, а не документ: скачанный файл открывается в браузере
-            // криво и это нормально — его вставляют в CMS, а не публикуют.
             'Content-Type' => $article
                 ? 'text/html; charset=UTF-8'
                 : 'text/markdown; charset=UTF-8',
@@ -196,6 +302,9 @@ class GeneratorController extends Controller
         ]);
     }
 
+    /**
+     * Локализованные метки стадий для UI.
+     */
     private function stageLabel(?string $stage): ?string
     {
         if ($stage === null) {

@@ -38,8 +38,8 @@
         .wrap { max-width: 1080px; margin: 0 auto; padding: 32px 20px 64px; }
 
         header.top {
-            display: flex; align-items: baseline; gap: 16px;
-            flex-wrap: wrap; margin-bottom: 28px;
+            display: flex; align-items: baseline; gap: 6px;
+            flex-wrap: wrap; margin-bottom: 10px;
         }
         header.top h1 { font-size: 22px; margin: 0; letter-spacing: -.01em; }
         header.top .sub { color: var(--muted); font-size: 13px; }
@@ -186,12 +186,34 @@
 </head>
 <body>
 <div class="wrap">
-    <header class="top">
-        <h1><a href="{{ route('runs.create') }}" style="color:inherit;text-decoration:none">Генератор текстов</a></h1>
-        <span class="sub">iGaming SEO · ресёрч → ТЗ → текст</span>
-        <div class="spacer"></div>
-        @yield('header-right')
+    <header class="top" style="padding:8px 12px;">
+
+        <!-- Первый ряд: заголовок слева, область справа (в одном ряду, на всю ширину) -->
+        <div style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+            <div style="display:flex;flex-direction:column;line-height:1;">
+                <!-- CHANGES: уменьшил размер шрифта и margin для экономии места -->
+                <h1 style="margin:0;font-size:1.125rem;font-weight:600;line-height:1;">
+                    <a href="{{ route('runs.create') }}" style="color:inherit;text-decoration:none">Генератор текстов</a>
+                </h1>
+                <span style="font-size:0.75rem;color:#6b7280;display:block;margin-top:2px;">iGaming SEO · ресёрч → ТЗ → текст</span>
+            </div>
+
+            <!-- Правая часть шапки -->
+            <div style="margin-left:8px;display:flex;align-items:center;">
+                @yield('header-right')
+            </div>
+        </div>
+
+        <!-- CHANGES: навигация всегда с новой строки; уменьшены внешние отступы -->
+        <nav aria-label="Главная навигация" style="margin-top:6px;margin-bottom:4px;">
+            <a href="{{ route('runs.create') }}" style="color:#2563eb;text-decoration:none;margin-right:12px;font-size:0.95rem;line-height:1.1;">Главная</a>
+            <a href="{{ route('runs.index') }}" style="color:#2563eb;text-decoration:none;font-size:0.95rem;line-height:1.1;">История</a>
+        </nav>
+
     </header>
+
+
+
 
     @yield('content')
 </div>

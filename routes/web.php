@@ -31,7 +31,9 @@ Route::post('/access', function (Request $request) {
     ], 401);
 })->name('access.post');
 
+
 Route::middleware(AccessCode::class)->group(function () {
+    // Форма создания прогона
     Route::get('/', [GeneratorController::class, 'index'])->name('runs.create');
 
     // Лимиты стоят только на запуске: он единственный тратит деньги.
@@ -39,6 +41,15 @@ Route::middleware(AccessCode::class)->group(function () {
         ->middleware(['throttle:textgen-hour', 'throttle:textgen-day'])
         ->name('runs.store');
 
+    // CHANGES: маршрут истории (GET /history)
+    // - Отображает таблицу прогона с фильтрами и пагинацией (25 записей, created_at desc).
+    Route::get('/history', [GeneratorController::class, 'history'])->name('runs.index');
+
+    // CHANGES: удаление прогона (DELETE /run/{run})
+    // - Удаление проверяет права сессии в контроллере (history_scope = session).
+    Route::delete('/run/{run}', [GeneratorController::class, 'destroy'])->name('runs.destroy');
+
+    // Показ конкретного прогона
     Route::get('/run/{run}', [GeneratorController::class, 'show'])->name('runs.show');
 
     // Опрос статуса идёт раз в пару секунд — свой лимит, посвободнее.
@@ -46,6 +57,7 @@ Route::middleware(AccessCode::class)->group(function () {
         ->middleware('throttle:120,1')
         ->name('runs.status');
 
+    // Скачивание частей прогона
     Route::get('/run/{run}/download/{part}', [GeneratorController::class, 'download'])
         ->whereIn('part', ['article', 'research', 'brief', 'audit', 'paa', 'entities', 'masterplan'])
         ->name('runs.download');
