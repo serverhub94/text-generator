@@ -12,6 +12,15 @@ auth.json
 composer.phar
 /vendor/
 /node_modules/
+/vendor_dump/
+
+# OpenServer 6 config
+/.osp/
+
+# Temporary composer dumps
+/composer_dump.json
+/composer_dump.lock
+/composer.lock
 
 # ------------------------------------------------------------------
 # Локальная база (SQLite для разработки; на сервере MySQL)
