@@ -42,6 +42,7 @@ class Run extends Model
         'model',         // CHANGES: сохранённая модель
         'target_query',  // CHANGES: денормализованный целевой запрос
         'session_id',    // CHANGES: идентификатор сессии
+        'stage',         // текущая стадия (ед. ч.) — колонка есть в миграции
         'stages',
         'usage',
         'cost_usd',

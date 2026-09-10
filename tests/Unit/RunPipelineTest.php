@@ -6,7 +6,6 @@ namespace Tests\Unit;
 
 use App\Models\Run;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
@@ -38,8 +37,19 @@ final class RunPipelineTest extends TestCase
 
     public function test_simulated_runpipeline_updates_run_record(): void
     {
-        // Получаем метаданные колонок таблицы runs
-        $columns = DB::select('SHOW COLUMNS FROM runs');
+        // Получаем метаданные колонок таблицы runs. Через Schema, а не
+        // `SHOW COLUMNS` — последнее MySQL-only и падает под SQLite в CI.
+        // Приводим к форме, которую ожидает цикл ниже (Field/Null/Default/Extra/Type).
+        $columns = array_map(
+            static fn (array $c): object => (object) [
+                'Field' => $c['name'],
+                'Null' => ($c['nullable'] ?? false) ? 'YES' : 'NO',
+                'Default' => $c['default'] ?? null,
+                'Extra' => ($c['auto_increment'] ?? false) ? 'auto_increment' : '',
+                'Type' => $c['type'] ?? $c['type_name'] ?? '',
+            ],
+            Schema::getColumns('runs'),
+        );
 
         // Колонки, которые не будем заполнять вручную
         $skip = ['id', 'uuid', 'created_at', 'updated_at'];

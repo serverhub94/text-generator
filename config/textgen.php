@@ -18,8 +18,12 @@ return [
     'api_key' => env('ANTHROPIC_API_KEY', ''),
 
     'model' => env('TEXTGEN_MODEL', 'claude-opus-5'),
-    'default_model' => env('TEXTGEN_MODEL', 'claude-opus-5'),
+    // Ключ профиля из реестра 'models' ниже (не API-id). Именно его Pipeline и
+    // GeneratorController берут как fallback, когда форма не прислала модель.
+    'default_model' => env('TEXTGEN_DEFAULT_MODEL', 'opus-5'),
     'history_scope' => env('TEXTGEN_HISTORY_SCOPE', 'all'),
+    // Сколько раз ClaudeService дозапрашивает продолжение при обрыве по длине.
+    'max_continuations' => (int) env('TEXTGEN_MAX_CONTINUATIONS', 5),
     /*
      | Версии серверных инструментов Anthropic. Вынесены в конфиг, чтобы
      | поднимать версию без правки кода, когда выходит новая.

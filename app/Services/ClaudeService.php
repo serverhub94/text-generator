@@ -58,8 +58,10 @@ final class ClaudeService implements TextModel
         ?string $geo = null,
         ?ModelProfile $profile = null, // <-- NEW: профиль модели, опционально
     ): ClaudeResult {
-        // Максимум дозапросов: сначала из конфига, иначе из env, иначе 5
-        $maxContinuations = (int) ($this->config['max_continuations'] ?? env('TEXTGEN_MAX_CONTINUATIONS', 5));
+        // Максимум дозапросов. Значение приходит только из конфига: чтение
+        // переменных окружения в рантайме ломается после config:cache
+        // (см. config/textgen.php, ключ max_continuations).
+        $maxContinuations = (int) ($this->config['max_continuations'] ?? 5);
         if ($maxContinuations < 0) {
             $maxContinuations = 5;
         }

@@ -31,7 +31,7 @@ class AccessCodeTest extends TestCase
     {
         config(['textgen.limits.access_code' => 'секрет']);
 
-        $this->post(route('runs.create'), ['access_code' => 'секрет'])
+        $this->post(route('access.post'), ['access_code' => 'секрет'])
             ->assertRedirect();
 
         $this->get(route('runs.create'))->assertOk()->assertSee('Ключевой запрос');
@@ -41,7 +41,7 @@ class AccessCodeTest extends TestCase
     {
         config(['textgen.limits.access_code' => 'секрет']);
 
-        $this->post(route('runs.create'), ['access_code' => 'мимо'])
+        $this->post(route('access.post'), ['access_code' => 'мимо'])
             ->assertStatus(401)
             ->assertSee('Код не подошёл');
     }

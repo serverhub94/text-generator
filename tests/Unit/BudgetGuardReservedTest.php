@@ -14,8 +14,12 @@ final class BudgetGuardReservedTest extends TestCase
 
     public function testReservedAndExceededConsiderQueuedAndRunningRuns(): void
     {
-        // Подготовим конфиг: простая цена и режимы с estimated_tokens
+        // Подготовим конфиг: простая цена и режимы с estimated_tokens.
+        // Реестр моделей и default_model очищаем — прогоны ниже создаются без
+        // модели, и тест намеренно проверяет ветку fallback-тарифов из pricing.
         config([
+            'textgen.default_model' => null,
+            'textgen.models' => [],
             'textgen.pricing' => [
                 'input_per_mtok' => 5.0,
                 'output_per_mtok' => 25.0,

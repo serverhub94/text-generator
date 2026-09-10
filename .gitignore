@@ -20,7 +20,7 @@ composer.phar
 # Temporary composer dumps
 /composer_dump.json
 /composer_dump.lock
-/composer.lock
+# composer.lock коммитим (стандарт Laravel) — воспроизводимые сборки на сервере
 
 # ------------------------------------------------------------------
 # Локальная база (SQLite для разработки; на сервере MySQL)

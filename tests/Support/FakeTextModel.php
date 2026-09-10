@@ -51,6 +51,7 @@ final class FakeTextModel implements TextModel
             webSearches: $withWebTools ? 3 : 0,
             stopReason: 'end_turn',
             costUsd: 0.0175,
+            successfulToolResponses: $withWebTools ? 3 : 0,
         );
     }
 
