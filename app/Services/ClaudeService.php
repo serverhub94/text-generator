@@ -83,123 +83,57 @@ final class ClaudeService implements TextModel
             //
             // --- BUILD STREAM PARAMETERS WITH RESPECT TO MODEL PROFILE ---
             //
-            // CHANGES:
-            // - We prepare thinking, outputConfig and tools conditionally based on $profile.
-            // - If $profile is null (backward compatibility), we keep previous defaults.
+            // Форма запроса совпадает с той, что работала до фичи выбора модели:
+            //   thinking: ['type' => 'adaptive'], outputConfig: ['effort' => ...].
+            // Профиль модели, если он задан, лишь ужимает параметры под возможности
+            // выбранной модели, но не меняет набор передаваемых полей:
+            //   - effort понижается до ближайшего поддерживаемого уровня;
+            //   - верхний потолок выхода ограничивается max_output_tokens модели;
+            //   - веб-инструменты отключаются, если модель их не умеет.
+            // Ключ output_config.max_output_tokens API не принимает — потолок задаётся
+            // только через верхнеуровневый maxTokens.
             //
             $modelName = (string) ($this->config['model'] ?? '');
 
-            // thinking: default adaptive, but if profile requests 'none' we omit it.
-            $thinkingParam = null;
+            $effectiveEffort = $effort;
+            $effectiveMaxTokens = $maxTokens;
             if ($profile !== null) {
-                $thinking = $profile->thinking();
-                if ($thinking !== '' && $thinking !== 'none') {
-                    // CHANGES: map profile thinking to SDK shape; here we pass ['type' => $thinking]
-                    $thinkingParam = ['type' => $thinking];
-                } else {
-                    // profile explicitly requests no thinking param -> leave null (do not send)
-                    $thinkingParam = null;
+                $effectiveEffort = $profile->effortFor($effort) ?? $effort;
+                $capped = $profile->maxTokensFor($maxTokens);
+                if ($capped > 0) {
+                    $effectiveMaxTokens = $capped;
                 }
-            } else {
-                // backward-compatible default
-                $thinkingParam = ['type' => 'adaptive'];
             }
 
-            //
-            // CHANGES: build output_config in snake_case and sanitize by whitelist
-            // - Avoid sending camelCase keys like maxOutputTokens which Anthropic rejects.
-            // - Do not include 'effort' unless API documents it; sending unknown keys causes 400.
-            //
-            $outputConfigParam = null;
-            if ($profile !== null) {
-                $maxOut = $profile->maxTokensFor($maxTokens);
-
-                $raw = [];
-
-                if ($maxOut > 0) {
-                    // IMPORTANT: snake_case key expected by API
-                    $raw['max_output_tokens'] = (int) $maxOut;
-                }
-
-                // Whitelist: перечислите здесь только те ключи, которые поддерживает ваш эндпойнт Anthropic.
-                // Если вы не уверены — оставьте только max_output_tokens.
-                $allowed = [
-                    'max_output_tokens',
-                    'temperature',
-                    'top_p',
-                    'stop_sequences',
-                    // добавьте другие официально поддерживаемые поля при необходимости
-                ];
-
-                $outputConfigParam = array_intersect_key($raw, array_flip($allowed));
-
-                if (empty($outputConfigParam)) {
-                    $outputConfigParam = null;
-                }
-            } else {
-                $outputConfigParam = null;
-            }
+            $thinkingParam = ['type' => 'adaptive'];
+            $outputConfigParam = ['effort' => $effectiveEffort];
 
             // tools: include only when requested and model allows web tools
             $toolsParam = null;
-            if ($withWebTools) {
-                if ($profile === null || $profile->webTools() !== 'none') {
-                    $toolsParam = $this->webTools($geo);
-                } else {
-                    // profile explicitly forbids web tools -> do not include tools param
-                    $toolsParam = null;
-                }
-            } else {
-                $toolsParam = null;
+            if ($withWebTools && ($profile === null || $profile->webTools() !== 'none')) {
+                $toolsParam = $this->webTools($geo);
             }
 
-            //
-            // --- CREATE STREAM (SDK CALL) ---
-            //
-            // CHANGES:
-            // - Log payload for debugging.
-            // - Call SDK without outputConfig when it is null to avoid SDK serializing null as an empty object.
-            //
             \Log::debug('Anthropic request params', [
                 'model' => $modelName,
-                'maxTokens' => $maxTokens,
+                'maxTokens' => $effectiveMaxTokens,
                 'output_config' => $outputConfigParam,
                 'thinking' => $thinkingParam,
-                'tools' => $toolsParam,
+                'tools' => $toolsParam !== null,
             ]);
 
-            // Некоторые SDK могут сериализовать null как присутствующий объект.
-            // Чтобы гарантированно опустить параметр, делаем два варианта вызова.
-            if ($outputConfigParam === null) {
-                $stream = $this->client->messages->createStream(
-                    maxTokens: $maxTokens,
-                    messages: $currentMessages,
-                    model: $modelName,
-                    cacheControl: ['type' => 'ephemeral', 'ttl' => '1h'],
-                    system: [
-                        ['type' => 'text', 'text' => $rules],
-                    ],
-                    // thinking: may be null to avoid sending unsupported param
-                    thinking: $thinkingParam,
-                    // tools: may be null to avoid sending unsupported param
-                    tools: $toolsParam,
-                );
-            } else {
-                $stream = $this->client->messages->createStream(
-                    maxTokens: $maxTokens,
-                    messages: $currentMessages,
-                    model: $modelName,
-                    cacheControl: ['type' => 'ephemeral', 'ttl' => '1h'],
-                    outputConfig: $outputConfigParam,
-                    system: [
-                        ['type' => 'text', 'text' => $rules],
-                    ],
-                    // thinking: may be null to avoid sending unsupported param
-                    thinking: $thinkingParam,
-                    // tools: may be null to avoid sending unsupported param
-                    tools: $toolsParam,
-                );
-            }
+            $stream = $this->client->messages->createStream(
+                maxTokens: $effectiveMaxTokens,
+                messages: $currentMessages,
+                model: $modelName,
+                cacheControl: ['type' => 'ephemeral', 'ttl' => '1h'],
+                outputConfig: $outputConfigParam,
+                system: [
+                    ['type' => 'text', 'text' => $rules],
+                ],
+                thinking: $thinkingParam,
+                tools: $toolsParam,
+            );
 
             $accumulator = MessageAccumulator::forMessages();
 

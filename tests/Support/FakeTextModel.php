@@ -6,6 +6,7 @@ namespace Tests\Support;
 
 use App\Services\ClaudeResult;
 use App\Services\Contracts\TextModel;
+use App\Services\ModelProfile;
 
 /**
  * Подставная модель: записывает всё, что ей передали, и отдаёт заранее
@@ -27,6 +28,7 @@ final class FakeTextModel implements TextModel
         int $maxTokens,
         bool $withWebTools = false,
         ?string $geo = null,
+        ?ModelProfile $profile = null,
     ): ClaudeResult {
         $this->calls[] = [
             'rules' => $rules,
@@ -35,6 +37,7 @@ final class FakeTextModel implements TextModel
             'maxTokens' => $maxTokens,
             'webTools' => $withWebTools,
             'geo' => $geo,
+            'profile' => $profile,
         ];
 
         $text = array_shift($this->responses) ?? 'Ответ по умолчанию.';
